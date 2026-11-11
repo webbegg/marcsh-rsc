@@ -23,4 +23,5 @@ SOFTWARE.
 
 The skills under skills/ and the ideas behind agents/ are adapted from
 rsc-harness (https://github.com/ericrisco/rsc-harness, package
-@ericrisco/rsc 4.1.2), MIT, Copyright (c) 2026 Eric Risco.
+@ericrisco/rsc 4.1.2, tag v4.1.2, commit f3765d35e91690c0c7e511447da6cd0176ab38e0),
+MIT, Copyright (c) 2026 Eric Risco.

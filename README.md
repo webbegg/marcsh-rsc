@@ -10,10 +10,10 @@ Both come from [rsc-harness](https://github.com/ericrisco/rsc-harness) by Eric R
 ## Install
 
 ```text
-/agents install <owner>/marcsh-rsc
+/agents install webbegg/marcsh-rsc
 ```
 
-(`<owner>` is not decided yet.) marcsh shows what the pack contains and asks before it enables anything. Updates are explicit: `/agents update <owner>/marcsh-rsc`.
+marcsh shows what the pack contains and asks before it enables anything. Updates are explicit: `/agents update webbegg/marcsh-rsc`.
 
 Then pick **FTD** or **ASDD** with Tab or `/agents`. The pack's skills and commands reach the engine only while one of its two agents is selected.
 
@@ -90,7 +90,7 @@ The skills call `npx @ericrisco/rsc ...`. Each call was checked against rsc 4.1.
 
 ## Credit
 
-The method, the skills and most of their text are the work of **Eric Risco**: [rsc-harness](https://github.com/ericrisco/rsc-harness) (MIT, Copyright (c) 2026 Eric Risco), adapted from package `@ericrisco/rsc` version 4.1.2. The local reference checkout used for this adaptation had no commits, so no upstream commit hash could be read; the package version is the identifier. Pin a commit here when the upstream state is known.
+The method, the skills and most of their text are the work of **Eric Risco**: [rsc-harness](https://github.com/ericrisco/rsc-harness) (MIT, Copyright (c) 2026 Eric Risco), adapted from package `@ericrisco/rsc` version 4.1.2 (upstream tag `v4.1.2`, commit `f3765d35e91690c0c7e511447da6cd0176ab38e0`).
 
 ## License
 
