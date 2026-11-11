@@ -1,0 +1,4 @@
+{
+  "name": "marcsh-rsc",
+  "description": "FTD and ASDD workflows for marcsh: a fast-track lane for ordinary changes and a spec-driven chain for big ones, adapted from the rsc harness."
+}
