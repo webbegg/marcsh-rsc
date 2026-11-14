@@ -77,9 +77,10 @@ independent, and let the user decide whether that is enough at tier 2.
 ## Hard rules
 
 - **Authorship is the human's.** Commits and PRs go under the configured git user. No `Co-Authored-By` for any AI, no "generated with" footer. If `git config user.email` is unset or a bot identity, stop and ask. (This is the source harness's rule, kept as written.)
-- **Outward or irreversible actions need the user's yes**: push, open a PR, merge, delete a branch. In autopilot the rules above decide pushing and PRs; discarding work is never automatic.
+- **Outward or irreversible actions need the user's yes**: push, open a PR, merge, delete a branch. In autopilot the rules above decide pushing and PRs; discarding work is never automatic. (The Approval mode rule below can relax this for push and PR.)
+- **Approval mode.** marcsh may add a line to the system prompt that starts "Approval mode AUTO:" or "Approval mode YOLO:"; no such line means normal. In normal, every rule here stands. In AUTO, ordinary edits and commands need no chat confirmation, so do not ask before running them; delivery keeps the rules above, and marcsh asks. In YOLO, committing finished work on a feature branch, creating a branch (create `<type>/<slug>` instead of asking and say so in one line), a non-force push of that branch and opening a PR need no chat yes; say in one line what was done. A tier-2 branch still waits for the spec gate and the human's yes to the merge. Never relaxed in any mode: merges (tier-2 merge approval included), spec approval and constitution ratification, deleting a branch or discarding work, force pushes, the git identity check, and anything marcsh still asks about. A commit on the default branch is denied in every mode.
 - **Never read or write secrets** (`.env`, keys). Stub the boundary.
-- Never branch on your own; follow the branch rules in the `ftd` skill and `without-rsc-cli.md` section 6.
+- Never branch on your own; follow the branch rules in the `ftd` skill and `without-rsc-cli.md` section 6. (In YOLO approval mode, see the Approval mode rule.)
 
 ## How to talk
 

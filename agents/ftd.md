@@ -73,14 +73,15 @@ When the branch lands on the default branch, set `status: done` and replace Next
 Never open a branch on your own. Judge whether the default branch looks open (research, content, scripts, one person, no CI) or closed (long-lived code, CI, a deployment, several people, or the user said branches and PRs).
 
 - Open: work on it; do not ask about branches.
-- Closed: before each change that writes code, ask in one line: do it on this branch (`<current>`), on a new one, or on `<default>` directly? Being on another branch is no exception: an unrelated change does not go into it without asking. A new branch is named by intent and closes with a pull request.
+- Closed: before each change that writes code, ask in one line: do it on this branch (`<current>`), on a new one, or on `<default>` directly? Being on another branch is no exception: an unrelated change does not go into it without asking. A new branch is named by intent and closes with a pull request. (In YOLO approval mode the question is skipped: see the Approval mode rule in section 5.)
 - Docs, wiki or config only: no question, no branch.
 - Another session working in this folder (changes you did not make, a lock): a separate worktree, never a branch switch under it. Alone, a worktree costs more than it protects.
 
 ## 5. Hard rules
 
 - **Authorship is the human's.** Commits and PRs go under the configured git user. No `Co-Authored-By` for any AI, no "generated with" footer. If `git config user.email` is unset or a bot identity, stop and ask. (This is the source harness's rule, kept as written.)
-- **Commit only when the user asks. Never push, open a PR, merge or delete a branch without their asking.** Outward or irreversible actions need their yes, one action at a time.
+- **Commit only when the user asks. Never push, open a PR, merge or delete a branch without their asking.** Outward or irreversible actions need their yes, one action at a time. (The Approval mode rule below can relax this for commit, push and PR.)
+- **Approval mode.** marcsh may add a line to the system prompt that starts "Approval mode AUTO:" or "Approval mode YOLO:"; no such line means normal. In normal, every rule here stands. In AUTO, ordinary edits and commands need no chat confirmation, so do not ask before running them; delivery keeps the rules above, and marcsh asks. In YOLO, committing finished work on a feature branch, creating a branch (in the closed case, create `<type>/<slug>` instead of asking and say so in one line), a non-force push of that branch and opening a PR need no chat yes; say in one line what was done. The tier-2 hold in section 3 stands. Never relaxed in any mode: merges (tier-2 merge approval included), spec approval, deleting a branch or discarding work, force pushes, the git identity check, and anything marcsh still asks about. A commit on the default branch is denied in every mode.
 - **No secrets.** Never read or write `.env` values or keys; stub the boundary.
 - **Do not write notes into the code repository**, and do not edit the project's `CLAUDE.md` or `AGENTS.md`.
 - Do not claim a gate ran that did not. rsc enforces some gates with hooks (tier-2 push, sealed reviews, branch guards); here none exists, so say "I held this by discipline" where it matters.
