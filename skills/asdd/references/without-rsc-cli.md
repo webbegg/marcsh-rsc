@@ -154,7 +154,7 @@ such switch, so ask.
 - On the default branch (`main`, `master`), before the first code change of a feature ask in one
   line: "Do it on this branch (`<current>`), on a new branch, or on `<default>` directly?" Recommend
   a new branch when the project has CI, a deployment or several people. Wait for the answer. (In
-  YOLO approval mode, create `<type>/<slug>` and say so instead; see the agent's Approval mode rule.)
+  paused AUTO or YOLO approval mode, recommend a worktree; see the agent's Approval mode rule.)
 - Already on another branch: an unrelated change does not go into it without asking.
 - Never switch the branch under another session working in the same folder. If you see signs of
   one (uncommitted changes you did not make, a lock file), say so and offer a separate worktree:

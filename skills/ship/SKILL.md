@@ -111,7 +111,7 @@ Stacked PR / feature-track support still fits inside the three landing options: 
 
 ## Executing each option
 
-**Nothing below runs before an option is picked.** Merging, pushing, opening a PR and deleting a branch are outward or irreversible — they change shared history or publish to a forge, and no later phase undoes them. Interactively, the user picks: a recommendation is not a yes; wait for one. (In YOLO approval mode the push and PR of option 2 need no chat yes, see the agent's Approval mode rule; merging and deleting still do.)
+**Nothing below runs before an option is picked.** Merging, pushing, opening a PR and deleting a branch are outward or irreversible — they change shared history or publish to a forge, and no later phase undoes them. Interactively, the user picks: a recommendation is not a yes; wait for one.
 
 **In autopilot** (the user's up-front yes) the agent picks by these rules, and there is always a legal path:
 
@@ -215,7 +215,7 @@ The commit is the durable record. Make it describe the change and tie it to the 
 
 Read `technical_level` from `02-DOCS/wiki/harness/user-profile.md` if the file exists. It changes the words, **never** the safety checklist or the authorship rule. No profile → use analogies and proceed; don't stall the ship to ask.
 
-In short plain sentences: the explainer, the checklist result in one line, the three options as one-liners, the recommendation and its *why*, then execute on a yes (in YOLO approval mode, a push or PR needs none) — e.g. `Clean, rebased, authorship <git user>. Recommend PR (main is protected). Open it?`. For a `non-technical` owner, explain the recommended option with an analogy: a protected `main` wants a PR ("asking permission before changing the shared copy"). Explain fast-forward vs `--no-ff` or what squashing trades away only when asked.
+In short plain sentences: the explainer, the checklist result in one line, the three options as one-liners, the recommendation and its *why*, then execute on a yes — e.g. `Clean, rebased, authorship <git user>. Recommend PR (main is protected). Open it?`. For a `non-technical` owner, explain the recommended option with an analogy: a protected `main` wants a PR ("asking permission before changing the shared copy"). Explain fast-forward vs `--no-ff` or what squashing trades away only when asked.
 
 ## Anti-patterns → STOP
 
