@@ -182,6 +182,51 @@ run_out() {
 
 TSH_ABS=$(command -v "$TSH") || { echo "no shell $TSH" >&2; exit 1; }
 
+# timed DIR PAYLOAD_FILE — run the hook on a payload file, killed after 15 s; sets RC, ERR, SECS.
+timed() {
+  _t0=$(date +%s)
+  (cd "$1" && CLAUDE_PROJECT_DIR=$1 exec "$TSH" "$HOOK" < "$2" > /dev/null 2> "$TMP/timed.err") &
+  _pid=$!
+  (sleep 15; pkill -P "$_pid" 2> /dev/null; kill "$_pid" 2> /dev/null) > /dev/null 2>&1 &
+  _wd=$!
+  wait "$_pid"
+  RC=$?
+  kill "$_wd" 2> /dev/null
+  SECS=$(($(date +%s) - _t0))
+  ERR=$(cat "$TMP/timed.err")
+}
+
+# expect_fast NAME SECS — the last timed run took less than SECS seconds.
+expect_fast() {
+  if [ "$SECS" -lt "$2" ]; then ok; else bad "$1: took ${SECS}s, want < $2s (exit $RC)" "$ERR"; fi
+}
+
+# big_payload FILE DIR KIND — a ~1 MB payload: KIND word (one word), cat (a heredoc written to a
+# file), sh (a heredoc fed to sh, with git push in the middle), commit (a 200 KB -m message).
+big_payload() {
+  awk -v dir="$2" -v kind="$3" 'BEGIN {
+    s = "the light is bright tonight and the night is quiet ok"
+    printf "{\"cwd\":\"%s\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"", dir
+    if (kind == "word") {
+      w = "abcdefghij"
+      for (i = 0; i < 6; i++) w = w w
+      for (i = 0; i < 1640; i++) printf "%s", w
+    } else if (kind == "commit") {
+      printf "git commit -m \\\"fix: big\\n\\n"
+      for (i = 0; i < 4000; i++) printf "%s ", s
+      printf "\\n\\nCo-Authored-By: Claude <noreply@anthropic.com>\\\""
+    } else {
+      printf "%s <<\047EOF\047\\n", (kind == "sh" ? "sh" : "cat > notes.md")
+      for (i = 0; i < 20000; i++) {
+        printf "%s\\n", s
+        if (kind == "sh" && i == 10000) printf "git push\\n"
+      }
+      printf "EOF"
+    }
+    printf "\",\"description\":\"x\"}}"
+  }' > "$1"
+}
+
 # Fake secrets, assembled here so this file does not contain them.
 AWS_KEY="AKIA""IOSFODNN7EXAMPLE"
 GH_TOK="gh""p_abcdefghijklmnopqrstuvwxyz0123456789"
@@ -458,6 +503,199 @@ hook "$TMP/s" 'git commit -am "fix: drop token"'
 expect_clean "commit -a removing the secret"
 
 # ---------------------------------------------------------------------------------------------
+# Push refspecs: the gates judge what is pushed, not HEAD (B1).
+new_repo rs
+put rs src/auth/login.js "export const login = () => 1"
+git -C "$TMP/rs" checkout -q -b docs/y main
+put rs docs/a.md "notes"
+git -C "$TMP/rs" checkout -q main
+mkdir -p "$TMP/rs/02-DOCS/wiki/sdd/specs"
+hook "$TMP/rs" "git push origin feat/x:main"
+expect "refspec: feat/x:main from main is a merge" 2 'human merges'
+hook "$TMP/rs" "git push origin +feat/x:main"
+expect "refspec: +feat/x:main" 2 'human merges'
+hook "$TMP/rs" "git push origin refs/heads/feat/x:refs/heads/main"
+expect "refspec: refs/heads/feat/x:refs/heads/main" 2 'human merges'
+hook "$TMP/rs" "git push origin feat/x"
+expect "refspec: feat/x pushed from main" 2 'branch: feat/x'
+hook "$TMP/rs" "git push origin docs/y feat/x"
+expect "refspec: several refspecs" 2 'branch: feat/x'
+hook "$TMP/rs" "git push origin docs/y"
+expect_clean "refspec: a tier-0 branch pushed by name"
+hook "$TMP/rs" "git push origin feat/x 2>&1"
+expect "refspec: a redirection is not a refspec" 2 'branch: feat/x'
+hook "$TMP/rs" "git push origin :feat/x"
+expect_clean "refspec: deleting a remote branch"
+hook "$TMP/rs" "git push --all origin"
+expect "refspec: --all judges every local branch" 2 'feat/x'
+hook "$TMP/rs" "git push --mirror"
+expect "refspec: --mirror judges every local branch" 2 'feat/x'
+hook "$TMP/rs" "gh pr create --head feat/x --fill"
+expect "gh pr create --head" 2 'branch: feat/x'
+hook "$TMP/rs" "echo feat/x:main | xargs git push origin"
+expect "refspec from xargs" 2 'human merges'
+git -C "$TMP/rs" checkout -q feat/x
+hook "$TMP/rs" "git push origin HEAD:main"
+expect "refspec: HEAD:main" 2 'human merges'
+hook "$TMP/rs" "git push origin main"
+expect_clean "refspec: main with nothing new"
+write_spec rs login feat/x
+progress rs login '## Review rounds' '```' '- T1: panel correctness, security, tests' '```'
+hook "$TMP/rs" "git push origin feat/x"
+expect "panel line inside a code fence does not count" 2 'panel correctness'
+progress rs login '## Review rounds' '- T1: panel correctness, security, tests'
+hook "$TMP/rs" "git push origin feat/x"
+expect_clean "refspec: feat/x with spec and panel"
+hook "$TMP/rs" "git push origin feat/x:main"
+expect "refspec: feat/x:main with a passing spec is still a merge" 2 'human merges'
+git -C "$TMP/rs" checkout -q main
+git -C "$TMP/rs" merge -q --no-ff -m "merge feat/x" feat/x
+git -C "$TMP/rs" checkout -q feat/x
+hook "$TMP/rs" "git push origin main"
+expect "refspec: main ahead with tier-2 work, from another branch" 2 'human merges'
+
+new_repo rx
+git -C "$TMP/rx" checkout -q -b feat/s main
+mkdir -p "$TMP/rx/src"
+printf 'export const t = "%s"\n' "$GH_TOK" > "$TMP/rx/src/gh.js"
+git -C "$TMP/rx" add src/gh.js
+git -C "$TMP/rx" commit -q -m "feat: gh"
+git -C "$TMP/rx" checkout -q -b feat/ai main
+printf 'x\n' > "$TMP/rx/ai.txt"
+git -C "$TMP/rx" add ai.txt
+git -C "$TMP/rx" commit -q -m "feat: ai" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
+git -C "$TMP/rx" checkout -q main
+hook "$TMP/rx" "git push origin feat/s"
+expect "refspec: secrets of the pushed branch" 2 'src/gh.js'
+hook "$TMP/rx" "git push origin feat/ai"
+expect "refspec: authorship of the pushed branch" 2 'credits an AI'
+
+# Wrappers (B2), stdin-fed shells (B3), cd - / pushd / popd.
+new_repo wr
+put wr src/auth/login.js "export const login = () => 1"
+mkdir -p "$TMP/wr/02-DOCS/wiki/sdd/specs"
+for c in "timeout 5 git push" "timeout -k 2 30 git push" "timeout --signal=KILL 5s git push" \
+  "timeout 5s gh pr create" "echo origin | xargs git push" "printf 'feat/x\n' | xargs -I{} git push origin {}" \
+  "xargs -0 git push < /dev/null" "stdbuf -oL git push" "stdbuf -o L git push" "watch -n 5 git push" \
+  "script -q -c 'git push' /dev/null" "script -q /dev/null git push" "find . -maxdepth 0 -exec git push \\;" \
+  "find . -maxdepth 0 -exec git push {} +" "parallel git push ::: origin" "flock /tmp/l git push" \
+  "flock -w 5 /tmp/l -c 'git push'" "chronic git push" "caffeinate -i git push" "unbuffer git push" \
+  "doas -u me git push" "env -S 'git push'" "env -u X -i git push" "nice -n 5 git push" "ionice -c 2 -n 7 git push" \
+  "setsid -f git push" "sudo -n git push" "sudo -u me -- git push" "/usr/bin/time -o /tmp/t git push" \
+  "exec -a x git push" "command -p git push"; do
+  hook "$TMP/wr" "$c"
+  expect "wrapper: $c" 2 'branch: feat/x'
+done
+for c in "timeout 5 git status" "command -v git" "ionice -p 123" "echo hello | sh" "xargs -I{} echo git push {}"; do
+  hook "$TMP/wr" "$c"
+  expect_clean "not gated: $c"
+done
+for c in "sh <<EOF
+git push
+EOF" "bash <<'EOF'
+git push
+EOF" "sh -s <<EOF
+git push
+EOF" "bash <<-EOF
+	git push
+	EOF" "cat <<EOF | bash
+git push
+EOF" \
+  "echo git push | sh" "printf 'git status\ngit push\n' | bash" "echo '\"git push\"' | xargs sh -c" \
+  "bash <<< 'git push'" "python3 gen.py | sh; echo 'then git push'"; do
+  hook "$TMP/wr" "$c"
+  expect "stdin shell: $c" 2 'branch: feat/x'
+done
+hook "$TMP/wr" "sh <<EOF
+echo hi
+EOF"
+expect_clean "stdin shell without a gated call"
+printf 'git push\n' > "$TMP/wr/deploy.sh"
+for c in ". ./deploy.sh" "source deploy.sh" "bash < deploy.sh"; do
+  hook "$TMP/wr" "$c"
+  expect "sourced file: $c" 2 'branch: feat/x'
+done
+hook "$TMP/wr" "source /nonexistent/env.sh && git status"
+expect "source outside the project" 1 'not read'
+hook "$TMP/other" "cd '$TMP/wr' && cd /tmp && cd - && git push"
+expect "cd - returns" 2 'branch: feat/x'
+hook "$TMP/wr" "pushd /tmp; popd; git push"
+expect "pushd / popd" 2 'branch: feat/x'
+
+# Secrets: ordinary code passes, real-looking keys block (B4). Keys are assembled here.
+new_repo sx
+mkdir -p "$TMP/sx/src"
+for line in 'password = hashed_password' 'self.token = new_token_value' '"tokenizer": "bert-base-uncased"' \
+  'TOKEN_ENDPOINT = "https://auth.example.com/oauth/token"' 'password_reset_url = "/accounts/reset/"' \
+  'snapshot.totalTokens = progress.totalTokens;' 'label_password = "Enter your password here"'; do
+  printf '%s\n' "$line" > "$TMP/sx/src/code.py"
+  git -C "$TMP/sx" add src/code.py
+  hook "$TMP/sx" 'git commit -m "feat: code"'
+  expect_clean "secrets: ordinary code: $line"
+done
+SLACK_TOK="xox""b-123456789012-1234567890123-abcdefghijklmnopqrstuvwx"
+for case in "src/k1.js|const k = \"ASIA""IOSFODNN7EXAMPLE\"" \
+  "src/k2.js|const k = \"github""_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz0123456789\"" \
+  "src/k3.js|slack($SLACK_TOK)" \
+  "src/k4.js|stripe('sk""_live_abcdefghijklmnop12345678')" \
+  "src/k5.js|stripe('rk""_live_abcdefghijklmnop12345678')" \
+  "src/k6.js|auth = 'ey""JhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ey""JzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c'" \
+  "src/k7.js|maps('AI""zaSyA1234567890abcdefghijklmnopqrstuv')" \
+  "src/k8.pem|-----BEGIN ""OPENSSH PRIVATE KEY-----" \
+  "src/k9.py|api""_key = \"q8Zr2LmW9xKp4TsV\"" \
+  "src/k10.ts|clientSecret: 'q8Zr2LmW9xKp4TsV'" \
+  "config/.env.production|DB_PASS""WORD=q8Zr2LmW9x" \
+  "config/prod.env|export SECRET""_KEY=q8Zr2LmW9x"; do
+  _p=${case%%|*} _l=${case#*|}
+  git -C "$TMP/sx" reset -q --hard
+  mkdir -p "$(dirname -- "$TMP/sx/$_p")"
+  printf '%s\n' "$_l" > "$TMP/sx/$_p"
+  git -C "$TMP/sx" add -f -- "$_p"
+  hook "$TMP/sx" 'git commit -m "feat: k"'
+  expect "secrets: blocks $_p" 2 "$_p"
+  git -C "$TMP/sx" reset -q
+  rm -f "$TMP/sx/$_p"
+done
+printf 'API_KEY=changeme\nDB_URL=postgres://localhost/db\n' > "$TMP/sx/.env.example"
+git -C "$TMP/sx" add -f .env.example
+hook "$TMP/sx" 'git commit -m "feat: env"'
+expect_clean "secrets: placeholder in an env file"
+git -C "$TMP/sx" reset -q
+
+# Authorship and queue minors.
+hook "$TMP/a" "git commit --trailer 'co-authored-by=claude' -m fix"
+expect "commit --trailer key=value" 2 'co-author'
+hook "$TMP/a" "git commit -m fix --trailer='Co-authored-by = Cursor <cursoragent@cursor.com>'"
+expect "commit --trailer= Cursor" 2 'co-author'
+hook "$TMP/a" 'git commit -m "fix" -m "Co-authored-by: aider (gpt-4) <noreply@aider.chat>"'
+expect "commit with an Aider co-author" 2 'co-author'
+progress q util '## Decision queue' '* [blocking] Q3 — pick one, T1'
+hook "$TMP/q" "gh pr merge --squash"
+expect "queue: * [blocking]" 2 'Q3'
+progress q util '## Decision queue' '- [Blocking] Q4 — pick one, T1'
+hook "$TMP/q" "gh pr merge --squash"
+expect "queue: [Blocking]" 2 'Q4'
+progress q util '## Decision queue' '- [review-after] Q1 — assumed UTC, spec, T1'
+
+# Large commands stay fast (B5): linear parsing, a pre-filter and a size cap.
+big_payload "$TMP/big-word.json" "$TMP/q" word
+timed "$TMP/q" "$TMP/big-word.json"
+expect_fast "1 MB single word" 5
+[ "$RC" = 0 ] && ok || bad "1 MB single word: exit $RC" "$ERR"
+big_payload "$TMP/big-cat.json" "$TMP/q" cat
+timed "$TMP/q" "$TMP/big-cat.json"
+expect_fast "1 MB heredoc without git" 5
+[ "$RC" = 0 ] && ok || bad "1 MB heredoc without git: exit $RC" "$ERR"
+big_payload "$TMP/big-sh.json" "$TMP/wr" sh
+timed "$TMP/wr" "$TMP/big-sh.json"
+expect_fast "1 MB heredoc with git push" 5
+[ "$RC" = 2 ] && ok || bad "1 MB heredoc with git push: exit $RC, want 2" "$ERR"
+big_payload "$TMP/big-commit.json" "$TMP/a" commit
+timed "$TMP/a" "$TMP/big-commit.json"
+expect_fast "200 KB commit message" 5
+[ "$RC" = 2 ] && ok || bad "200 KB commit message: exit $RC, want 2" "$ERR"
+
+# ---------------------------------------------------------------------------------------------
 # Without jq: the awk payload parser.
 NOJQ=$TMP/nojq-bin
 mkdir -p "$NOJQ"
@@ -479,6 +717,25 @@ hook_raw "$TMP/a" '{"tool_input":{"command":"ls -la"}}' "$NOJQ"
 expect_clean "no jq: plain command"
 hook_raw "$TMP/a" '{"tool_input": {"command": "git push' "$NOJQ"
 expect_allow "no jq: truncated payload"
+
+# Without git: a note, nothing blocked.
+NOGIT=$TMP/nogit-bin
+mkdir -p "$NOGIT"
+for t in sh "$TSH" awk sed grep cat dirname basename tr cksum sort head wc ls mkdir rm env uname expr printf test cut; do
+  _p=$(command -v "$t" 2> /dev/null) || continue
+  case $_p in /*) ln -sf "$_p" "$NOGIT/$t" ;; esac
+done
+hook "$TMP/h" "git push" Bash "$NOGIT"
+expect "no git on PATH" 1 'git'
+
+# Every git call runs with GIT_NO_LAZY_FETCH=1 (no fetch in a partial clone).
+FAKEGIT=$TMP/fakegit-bin
+mkdir -p "$FAKEGIT"
+printf '#!/bin/sh\nprintf "%%s\\n" "${GIT_NO_LAZY_FETCH:-unset}" >> "%s"\nexec "%s" "$@"\n' "$TMP/lazy.log" "$(command -v git)" > "$FAKEGIT/git"
+chmod +x "$FAKEGIT/git"
+: > "$TMP/lazy.log"
+hook "$TMP/a" "git push" Bash "$FAKEGIT:$PATH"
+if [ -s "$TMP/lazy.log" ] && ! grep -qv '^1$' "$TMP/lazy.log"; then ok; else bad "GIT_NO_LAZY_FETCH=1 on every git call" "$(cat "$TMP/lazy.log")"; fi
 
 # ---------------------------------------------------------------------------------------------
 # implement/scripts fixes.

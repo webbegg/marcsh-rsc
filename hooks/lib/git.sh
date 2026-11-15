@@ -2,10 +2,12 @@
 #
 # Every call is read-only and independent of the user's git config: no colour, no external diff
 # or textconv, fixed a/ b/ prefixes, unquoted paths, and GIT_OPTIONAL_LOCKS=0 so `git status` and
-# `git diff` never refresh (write) the index. Few processes: a hook on pi must stay fast.
+# `git diff` never refresh (write) the index, and GIT_NO_LAZY_FETCH=1 so a partial clone never
+# fetches a missing object over the network. Few processes: a hook on pi must stay fast.
 
 GIT_OPTIONAL_LOCKS=0
-export GIT_OPTIONAL_LOCKS
+GIT_NO_LAZY_FETCH=1
+export GIT_OPTIONAL_LOCKS GIT_NO_LAZY_FETCH
 
 # rsc_git DIR ARGS... — git in DIR with a neutral config.
 rsc_git() {
