@@ -1,20 +1,21 @@
 # hooks/lib/parse-command.awk — find the gated git/gh calls in a shell command line.
 #
-#   gated_text(s)          1 when s may hold a gated call or read a file as commands (cheap
-#                          pre-filter, linear)
+#   gated_text(s)          1 when s may hold a gated call, read a file as commands or run a
+#                          shell (cheap pre-filter, linear)
 #   gated_lines(s)         the lines of s for which gated_text holds (commands over 256 KB)
 #   analyze(command, dir)  prints the gated calls. Needs msg-check.awk and json-get.awk (tjoin).
 #
 # A small shell reader. Quotes (single, double, backslash), comments, line continuations,
 # `;` `&&` `||` `|` `&` `(` `)` and backticks between commands, here-documents and here-strings,
 # env assignments. Wrappers are unwrapped to the command they run: env (also -S, -C), command,
-# exec, nohup, time, nice, ionice, sudo, doas, timeout, stdbuf, setsid, chronic, unbuffer,
+# exec, nohup, time, nice, ionice, sudo, doas, timeout, gtimeout, stdbuf, setsid, chronic, unbuffer,
 # caffeinate, flock, script, watch, xargs, find -exec, parallel. `cd DIR`, `cd -`, `pushd` and
 # `popd` are followed for the commands after them, and `git -C DIR`. Read again as commands:
 # `sh -c` / `bash -c` / `eval` strings; what a shell reads on stdin (`sh <<EOF`, `bash <<<`,
-# `sh < file`, `echo ... | sh`, `printf ... | bash`, `cat <<EOF | sh`, `... | xargs sh -c`); a
-# file passed to `source` / `.` when it is inside the project ($CLAUDE_PROJECT_DIR, else the
-# payload's cwd; elsewhere a note says it was not read).
+# `sh < file`, `echo ... | sh`, `printf ... | bash`, `cat <<EOF | sh`, `cat file | sh`,
+# `cat < file | sh`, `tee < file | sh`, `... | xargs sh -c`); a file passed to `source` / `.` or
+# run as a shell's script (`sh file`, `bash -x ./file args`) or fed to its stdin, when it is inside
+# the project ($CLAUDE_PROJECT_DIR, else the payload's cwd; elsewhere a note says it was not read).
 #
 # When a shell reads stdin from a command this reader cannot see through (`curl ... | sh`), every
 # line of the command text that holds a `git` word followed by push/commit/merge, or a `gh` word
@@ -34,11 +35,15 @@
 #   push       <dir> <src> <dst or "@push" or "">      one per refspec; not --dry-run/--delete.
 #                                                      dst "" = the name of src (HEAD: the
 #                                                      current branch); @push = a plain push
+#   push-del   <dir> <ref>                             a remote ref a push deletes (:ref,
+#                                                      --delete / -d ref)
 #   push-all   <dir>                                   --all, --branches, --mirror, a glob
 #   pr-create  <dir> <head branch or "">
 #   pr-merge   <dir> <target or "">
 #   merge      <dir> <target>                          one per target; not --abort etc.
 #   note       <dir> <text>                            something that could not be read
+#   too-many   <dir> <n>                               over MAXG (20) distinct gated calls: the
+#                                                      only line printed (the hook blocks)
 
 function gated_call(s,   t, p) {
   t = " " s " "
@@ -53,12 +58,13 @@ function gated_call(s,   t, p) {
   return 0
 }
 
-# gated_call, or a file read as commands: `source F`, `. F`, `sh < F`.
+# gated_call, a file read as commands (`source F`, `. F`), or a shell word anywhere (`sh < F`,
+# `cat F | sh`, `bash F`): a shell may read a file or a pipe, so it always reaches the parser.
 function gated_text(s,   t) {
   if (gated_call(s)) return 1
   t = " " s
   if (match(t, /[^A-Za-z0-9_.-](source|\.)[ \t]/)) return 1
-  return match(t, /(sh|bash|dash|zsh|ksh)[ \t]+([-+][A-Za-z]+[ \t]+)*0?</) > 0
+  return match(t, /[^A-Za-z0-9_.-](sh|bash|dash|zsh|ksh|ash|mksh|yash|posh)([^A-Za-z0-9_.-]|$)/) > 0
 }
 
 function gated_lines(s,   n, L, i, m, K, l) {
@@ -66,7 +72,7 @@ function gated_lines(s,   n, L, i, m, K, l) {
   m = 0
   for (i = 1; i <= n; i++) {
     l = L[i]
-    if (l ~ /git|gh|source|\.[ \t]|</ && gated_text(l)) K[++m] = l "\n"
+    if (l ~ /git|gh|source|\.[ \t]|sh/ && gated_text(l)) K[++m] = l "\n"
   }
   return tjoin(K, m)
 }
@@ -81,11 +87,17 @@ function analyze(command, dir,   qi) {
   PROJECT = ENVIRON["CLAUDE_PROJECT_DIR"]
   if (PROJECT !~ /^\//) PROJECT = dir
   PROJECT = normpath(PROJECT)
+  MAXG = 20
   NQ = 0
   NPS = 0
   DEPTH = 0
+  NEM = 0
+  NGATED = 0
+  NNOTE = 0
   enqueue_text(command, dir)
   for (qi = 1; qi <= NQ; qi++) run(qi)
+  if (NGATED > MAXG) { print "too-many" TAB dir TAB NGATED; return }
+  for (qi = 1; qi <= NEM; qi++) print EM[qi]
 }
 
 # --- the queue of texts to read: QL[q, line], QN[q] lines, QD[q] directory -----------------------
@@ -132,10 +144,15 @@ function run(q,   si, cur) {
   for (si = 1; si <= NSEG; si++) cur = cmd_at(si, 1, NW[si], cur)
 }
 
-function emit(line) {
+# emit(line): queues an output line once. Over MAXG distinct gated calls only the count is kept
+# (analyze prints a too-many line instead); notes are kept up to MAXG.
+function emit(line,   kind) {
   if (line in EMITTED) return
   EMITTED[line] = 1
-  print line
+  kind = substr(line, 1, index(line, TAB) - 1)
+  if (kind == "note") { if (++NNOTE <= MAXG) EM[++NEM] = line; return }
+  if (kind != "commit-bad" && ++NGATED > MAXG) return
+  EM[++NEM] = line
 }
 
 # --- tokenizer: NSEG segments; NW[seg] words W[seg, i]; SP[seg] = 1 when stdin is a pipe from
@@ -441,7 +458,7 @@ function cmd_at(si, k, nw, cur,   ret, w, b, j) {
     if (b == "stdbuf") { k = skip_opts(si, k + 1, nw, "ioe", " input output error "); continue }
     if (b == "sudo") { k = skip_opts(si, k + 1, nw, "ugChprtUDRT", " user group close-from host prompt role type other-user chdir chroot command-timeout "); continue }
     if (b == "doas") { k = skip_opts(si, k + 1, nw, "aCu", ""); continue }
-    if (b == "timeout") { k = skip_opts(si, k + 1, nw, "ks", " kill-after signal ") + 1; continue }
+    if (b == "timeout" || b == "gtimeout") { k = skip_opts(si, k + 1, nw, "ks", " kill-after signal ") + 1; continue }
     if (b == "ionice") {
       for (j = k + 1; j <= nw && W[si, j] ~ /^-/; j++)
         if (W[si, j] ~ /^-[A-Za-z0-9]*[pPu]/ || W[si, j] ~ /^--(pid|pgid|uid)/) return ret
@@ -467,7 +484,7 @@ function cmd_at(si, k, nw, cur,   ret, w, b, j) {
   w = W[si, k]
   b = base_name(w)
   if (b == "cd" || b == "pushd" || b == "popd") return chdir(si, k + 1, nw, cur, b)
-  if (b == "source" || w == ".") { if (k < nw) source_file(W[si, k + 1], cur); return ret }
+  if (b == "source" || w == ".") { if (k < nw) source_file(W[si, k + 1], cur, "source"); return ret }
   if (b ~ SHELLS_RE) { shell_cmd(si, k + 1, nw, cur); return ret }
   if (b == "eval") { enqueue_text(wjoin(si, k + 1, nw, " "), cur); return ret }
   if (b == "xargs") { xargs_cmd(si, k + 1, nw, cur); return ret }
@@ -597,13 +614,14 @@ function chdir(si, k, nw, cur, b,   t, d) {
   return t == "" ? HOME_DIR : resolve(cur, t)
 }
 
-# source_file(p, cur): queues the file's lines when it is inside the project; else a note.
-function source_file(p, cur,   path, n, r, line, bytes, i, m, FL, key) {
+# source_file(p, cur, what): queues the file's lines when it is inside the project; else a note
+# (what: how the file is read, for the note).
+function source_file(p, cur, what,   path, n, r, line, bytes, i, m, FL, key) {
   if (p == "") return
-  if (p ~ /[$`*?]/) { emit("note" TAB cur TAB "source " p ": the path is not literal, the file was not read"); return }
+  if (p ~ /[$`*?]/) { emit("note" TAB cur TAB what " " p ": the path is not literal, the file was not read"); return }
   path = normpath(resolve(cur, p))
   if (PROJECT != "/" && substr(path, 1, length(PROJECT) + 1) != PROJECT "/") {
-    emit("note" TAB cur TAB "source " p ": outside the project (" PROJECT "), the file was not read")
+    emit("note" TAB cur TAB what " " p ": outside the project (" PROJECT "), the file was not read")
     return
   }
   key = "file" SUBSEP path SUBSEP cur
@@ -618,7 +636,7 @@ function source_file(p, cur,   path, n, r, line, bytes, i, m, FL, key) {
   }
   close(path)
   if (n == 0) {
-    if (r < 0) emit("note" TAB cur TAB "source " p ": cannot read the file, it was not read")
+    if (r < 0) emit("note" TAB cur TAB what " " p ": cannot read the file, it was not read")
     return
   }
   NQ++
@@ -629,27 +647,63 @@ function source_file(p, cur,   path, n, r, line, bytes, i, m, FL, key) {
 }
 
 # stdin_src(si): what the command of segment si reads on stdin. SRC = hd (here-documents of
-# segment SRC_SEG), text (SRC_TEXT), file (path SRC_TEXT), unknown (a pipe from a command this
-# reader cannot see through) or none.
-function stdin_src(si,   j, w, p, k, b, n) {
+# segment SRC_SEG), text (SRC_TEXT), file (paths SRC_F[1..SRC_NF]; SRC_TEXT = the first),
+# unknown (a pipe from a command this reader cannot see through) or none. Through a pipe, the
+# producer is read: echo and printf give text; cat gives its files, else (like tee) its own stdin.
+function stdin_src(si,   j, w, n) {
   SRC = "none"
   SRC_TEXT = ""
   SRC_SEG = ""
+  SRC_NF = 0
   if (HDN[si] > 0) { SRC = "hd"; SRC_SEG = si; return }
   n = NW[si]
   for (j = 1; j <= n; j++) {
     w = W[si, j]
     if (substr(w, 1, 3) == "<<<") { SRC = "text"; SRC_TEXT = (w == "<<<") ? W[si, j + 1] : substr(w, 4); return }
-    if (w == "<" || w == "0<") { SRC = "file"; SRC_TEXT = W[si, j + 1]; return }
-    if (w ~ /^0?<[^<>&(]/) { SRC = "file"; SRC_TEXT = substr(w, index(w, "<") + 1); return }
+    if (w == "<" || w == "0<") { src_file(W[si, j + 1]); return }
+    if (w ~ /^0?<[^<>&(]/) { src_file(substr(w, index(w, "<") + 1)); return }
   }
   if (!SP[si]) return
   SRC = "unknown"
-  p = si - 1
-  if (p < 1) return
+  if (si - 1 < 1 || PDEPTH >= 16) return
+  PDEPTH++
+  producer(si - 1)
+  PDEPTH--
+}
+
+function src_file(p) {
+  SRC = "file"
+  SRC_NF = 1
+  SRC_F[1] = p
+  SRC_TEXT = p
+}
+
+# producer(p): stdin_src's reading of segment p, whose output is piped on.
+function producer(p,   k, b, j, w, nf, ops) {
   k = 1
-  while (k <= NW[p] && W[p, k] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) k++
+  while (k <= NW[p]) {
+    w = W[p, k]
+    if (w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) { k++; continue }
+    if (is_redir(w)) { if (bare_redir(w)) k++; k++; continue }
+    break
+  }
   b = base_name(W[p, k])
+  if (b == "cat" || b == "tee") {
+    nf = 0
+    ops = 0
+    if (b == "cat") {
+      for (j = k + 1; j <= NW[p]; j++) {
+        w = W[p, j]
+        if (is_redir(w)) { if (bare_redir(w)) j++; continue }
+        if (!ops && w == "--") { ops = 1; continue }
+        if (w == "-" || (!ops && w ~ /^-./)) continue
+        SRC_F[++nf] = w
+      }
+    }
+    if (nf > 0) { SRC = "file"; SRC_NF = nf; SRC_TEXT = SRC_F[1]; return }
+    stdin_src(p)
+    return
+  }
   if (b == "echo") {
     k++
     while (k <= NW[p] && W[p, k] ~ /^-[neE]+$/) k++
@@ -665,19 +719,18 @@ function stdin_src(si,   j, w, p, k, b, n) {
     SRC_TEXT = unesc(W[p, k]) "\n" wjoin(p, k + 1, NW[p], "\n")
     return
   }
-  if (b == "cat") {
-    if (HDN[p] > 0) { SRC = "hd"; SRC_SEG = p; return }
-    for (j = k + 1; j <= NW[p]; j++)
-      if (substr(W[p, j], 1, 3) == "<<<") { SRC = "text"; SRC_TEXT = (W[p, j] == "<<<") ? W[p, j + 1] : substr(W[p, j], 4); return }
-  }
 }
 
 # A shell reading its commands on stdin.
-function stdin_shell(si, cur) {
+function stdin_shell(si, cur,   i, n, F) {
   stdin_src(si)
   if (SRC == "hd") enqueue_hd(SRC_SEG, cur)
   else if (SRC == "text") enqueue_text(SRC_TEXT, cur)
-  else if (SRC == "file") source_file(SRC_TEXT, cur)
+  else if (SRC == "file") {
+    n = SRC_NF
+    for (i = 1; i <= n; i++) F[i] = SRC_F[i]
+    for (i = 1; i <= n; i++) source_file(F[i], cur, "a shell reads")
+  }
   else if (SRC == "unknown") fallback(cur)
 }
 
@@ -704,7 +757,8 @@ function shell_cmd(si, k, nw, cur,   w, stdin) {
   while (k <= nw) {
     w = W[si, k]
     if (is_redir(w)) { if (bare_redir(w)) k++; k++; continue }
-    if (w == "-" || w == "--") { k++; break }
+    if (w == "-") { stdin = 1; break }
+    if (w == "--") { k++; break }
     if (w ~ /^[-+][oO]$/ || w == "--rcfile" || w == "--init-file") { k += 2; continue }
     if (w ~ /^--/) { k++; continue }
     if (w ~ /^[-+][A-Za-z]+$/) {
@@ -721,6 +775,7 @@ function shell_cmd(si, k, nw, cur,   w, stdin) {
   }
   while (k <= nw && is_redir(W[si, k])) { if (bare_redir(W[si, k])) k++; k++ }
   if (stdin || k > nw) stdin_shell(si, cur)
+  else source_file(W[si, k], cur, "a shell runs")
 }
 
 function xargs_cmd(si, k, nw, cur,   w, repl, j, n, ch, rest, t, L, i, m, ps) {
@@ -896,11 +951,16 @@ function git_commit(si, k, nw, dir,   w, wide, msgfile, j, ch, rest, arg, m, i) 
   if (CHK_REASON != "") emit("commit-bad" TAB dir TAB CHK_REASON)
 }
 
-function git_push(si, k, nw, dir,   w, j, all, repo, nref, ops, spec, c, src, dst) {
+function git_push(si, k, nw, dir,   w, j, all, repo, nref, ops, spec, c, src, dst, del) {
+  del = 0
   for (j = k; j <= nw; j++) {
     w = W[si, j]
-    if (w == "--dry-run" || w == "--delete") return
-    if (w ~ /^-[A-Za-z0-9]+$/ && (index(w, "n") || index(w, "d"))) return
+    if (w == "--dry-run") return
+    if (w == "--delete") del = 1
+    if (w ~ /^-[A-Za-z0-9]+$/) {
+      if (index(w, "n")) return
+      if (index(w, "d")) del = 1
+    }
   }
   all = 0
   repo = 0
@@ -918,19 +978,27 @@ function git_push(si, k, nw, dir,   w, j, all, repo, nref, ops, spec, c, src, ds
     if (!repo) { repo = 1; continue }
     if (w == "tag" && j < nw) {
       j++
-      emit("push" TAB dir TAB "refs/tags/" W[si, j] TAB "refs/tags/" W[si, j])
+      if (del) emit("push-del" TAB dir TAB "refs/tags/" W[si, j])
+      else emit("push" TAB dir TAB "refs/tags/" W[si, j] TAB "refs/tags/" W[si, j])
       nref++
       continue
     }
     spec = w
     sub(/^\+/, "", spec)
+    if (del) {
+      sub(/^[^:]*:/, "", spec)
+      if (spec != "") emit("push-del" TAB dir TAB spec)
+      continue
+    }
     if (index(spec, "*")) { all = 1; continue }
     c = index(spec, ":")
     if (c) { src = substr(spec, 1, c - 1); dst = substr(spec, c + 1) }
     else { src = spec; dst = "" }
     nref++
     if (src != "") emit("push" TAB dir TAB src TAB dst)
+    else if (dst != "") emit("push-del" TAB dir TAB dst)
   }
+  if (del) return
   if (all) emit("push-all" TAB dir)
   else if (nref == 0) emit("push" TAB dir TAB "HEAD" TAB "@push")
 }

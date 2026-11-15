@@ -17,10 +17,10 @@ gate_secrets_commit() {
   block "git commit: the changes being committed look like they hold a secret ($_gs_hits). Remove it and load it from the environment; mark a deliberate fake with gitleaks:allow on its line."
 }
 
-# gate_secrets_push [SRC] [WHAT] — the commits SRC (default HEAD) adds to the default branch.
-gate_secrets_push() {
-  [ "$RSC_HAS_DEFAULT" = 1 ] || return 0 # gate_authorship_push already noted it
-  _gs_src=${1:-HEAD}
-  _gs_hits=$(rsc_diff "$RSC_TOP" -U0 --no-renames "$RSC_DEFAULT_REF...$_gs_src" 2> /dev/null | awk -f "$LIB/secrets.awk") && return 0
-  block "${2:-git push}: the branch diff $RSC_DEFAULT_REF...$_gs_src looks like it holds a secret ($_gs_hits). Remove it from the history before pushing, and rotate it if it was ever pushed."
+# gate_secrets_diff SRC WHAT DIFF — a push of SRC: DIFF is the branch diff <default>...SRC
+# (`-U0 --no-renames`), computed once by gate_push_commits.
+gate_secrets_diff() {
+  [ -n "$3" ] || return 0
+  _gs_hits=$(printf '%s\n' "$3" | awk -f "$LIB/secrets.awk") && return 0
+  block "${2:-git push}: the branch diff $RSC_DEFAULT_REF...$1 looks like it holds a secret ($_gs_hits). Remove it from the history before pushing, and rotate it if it was ever pushed."
 }

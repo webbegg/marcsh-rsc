@@ -7,8 +7,8 @@
 # Exit 0 (nothing printed: nothing to check), or 3 when the payload is not valid JSON.
 #
 # Cost: the payload is read once (linear). A command that cannot hold a gated call (gated_text:
-# no `git` word followed by push/commit/merge, no `gh` word followed by `pr`, no `source`/`.`)
-# is not parsed at all. A command over 256 KB is cut down to its lines that could hold one
+# no `git` word followed by push/commit/merge, no `gh` word followed by `pr`, no `source`/`.`, no
+# shell word such as `sh` or `bash`) is not parsed at all. A command over 256 KB is cut down to its lines that could hold one
 # (gated_lines) before it is parsed.
 
 { T[++NT] = $0 "\n" }
