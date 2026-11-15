@@ -747,7 +747,7 @@ expect "21 distinct refspecs block" 2 'too many git pushes'
 # A git that counts its calls (and, with $TMP/git.sleep, is slow).
 CNTGIT=$TMP/cntgit-bin
 mkdir -p "$CNTGIT"
-printf '#!/bin/sh\necho x >> "%s"\n[ -f "%s" ] && sleep 1\nexec "%s" "$@"\n' "$TMP/git.calls" "$TMP/git.sleep" "$(command -v git)" > "$CNTGIT/git"
+printf '#!/bin/sh\necho x >> "%s"\n[ -f "%s" ] && sleep 2\nexec "%s" "$@"\n' "$TMP/git.calls" "$TMP/git.sleep" "$(command -v git)" > "$CNTGIT/git"
 chmod +x "$CNTGIT/git"
 # git_calls_at_most NAME N — the last timed run made at most N git calls.
 git_calls_at_most() {
@@ -760,17 +760,92 @@ timed "$TMP/mp" "$TMP/mp-20y.json" 15 "$CNTGIT:$PATH"
 expect_fast "20 pushes of one commit" 10
 expect_clean "20 pushes of one tier-1 commit"
 git_calls_at_most "20 pushes of one commit are checked once" 8
+# load_info — sets LOAD (the 1-minute load average, from uptime) and LOAD_HIGH (1 when it is at
+# least the number of CPUs: the deadline may then block an honest push).
+load_info() {
+  LOAD=$(uptime 2> /dev/null | sed -n 's/.*load averages*: *\([0-9.]*\).*/\1/p')
+  _cpus=$(getconf _NPROCESSORS_ONLN 2> /dev/null) || _cpus=''
+  case $_cpus in '' | *[!0-9]*) _cpus=4 ;; esac
+  LOAD_HIGH=$(awk -v l="${LOAD:-0}" -v c="$_cpus" 'BEGIN { print (l + 0 >= c + 0) ? 1 : 0 }')
+}
+# expect_clean_or_loaded NAME — exit 0 and no output; under a high load the deadline may block.
+expect_clean_or_loaded() {
+  load_info
+  printf 'info: %s: %ss, exit %s, load %s (high: %s)\n' "$1" "$SECS" "$RC" "${LOAD:-?}" "$LOAD_HIGH"
+  if [ "$RC" = 2 ] && [ "$LOAD_HIGH" = 1 ]; then expect "$1: only the deadline blocks it (high load)" 2 'ran out of time'
+  else expect_clean "$1"; fi
+}
+git_calls() { _n=$(wc -l < "$TMP/git.calls" | tr -d ' '); printf '%s\n' "$_n"; }
 payload "$TMP/mp" "$(many_cmd 5 'git push origin y%d;')" > "$TMP/mp-5.json"
 : > "$TMP/git.calls"
 timed "$TMP/mp" "$TMP/mp-5.json" 15 "$CNTGIT:$PATH"
-expect_clean "5 pushes of 5 tier-1 commits"
-git_calls_at_most "5 pushes of 5 commits: 3 git calls each" 17
+expect_clean_or_loaded "5 pushes of 5 tier-1 commits"
+_calls5=$(git_calls)
+git_calls_at_most "5 pushes of 5 commits: checked together" 9
 payload "$TMP/mp" "$(many_cmd 20 'git push origin y%d;')" > "$TMP/mp-20.json"
-timed "$TMP/mp" "$TMP/mp-20.json"
+: > "$TMP/git.calls"
+timed "$TMP/mp" "$TMP/mp-20.json" 15 "$CNTGIT:$PATH"
 expect_fast "20 pushes of 20 commits" 10
-if [ "$RC" = 0 ]; then expect_clean "20 pushes of 20 tier-1 commits"
-else expect "20 pushes of 20 tier-1 commits: only the deadline blocks them (a slow machine)" 2 'ran out of time'; fi
-printf 'info: 20 pushes of 20 commits: %ss, exit %s\n' "$SECS" "$RC"
+expect_clean_or_loaded "20 pushes of 20 tier-1 commits"
+_calls20=$(git_calls)
+printf 'info: git calls: 5 pushes of 5 commits %s, 20 pushes of 20 commits %s\n' "$_calls5" "$_calls20"
+[ "$_calls20" = "$_calls5" ] && ok || bad "20 pushes of 20 commits: $_calls20 git calls, want the same as 5 pushes ($_calls5)"
+# Many commits in one refspec: one git log and one diff, whatever their number.
+# fi_branch REPO BRANCH N [AT KIND] — BRANCH off main with N commits (fast-import), each rewriting
+# src/big.js; commit AT credits an AI (KIND ai) or adds a fake AWS key in src/conf.js (KIND secret).
+fi_branch() {
+  awk -v br="$2" -v n="$3" -v at="${4:-0}" -v kind="${5:-}" -v key="$AWS_KEY" 'BEGIN {
+    for (i = 1; i <= n; i++) {
+      printf "commit refs/heads/%s\ncommitter Test Human <human@example.com> %d +0000\n", br, 1700000000 + i
+      m = "feat: big " i
+      if (i == at && kind == "ai") m = m "\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
+      printf "data <<EOM\n%s\nEOM\n", m
+      if (i == 1) printf "from refs/heads/main\n"
+      printf "M 100644 inline src/big.js\ndata <<EOM\nexport const n = %d\nEOM\n", i
+      if (i == at && kind == "secret") printf "M 100644 inline src/conf.js\ndata <<EOM\nexport const k = \"%s\"\nEOM\n", key
+    }
+  }' | git -C "$TMP/$1" fast-import --quiet
+}
+fi_branch mp big5 5
+fi_branch mp big30 30
+fi_branch mp big200 200
+fi_branch mp big-ai 200 150 ai
+fi_branch mp big-sec 200 150 secret
+payload "$TMP/mp" "git push origin big5" > "$TMP/mp-big5.json"
+: > "$TMP/git.calls"
+timed "$TMP/mp" "$TMP/mp-big5.json" 15 "$CNTGIT:$PATH"
+expect_clean_or_loaded "1 refspec of 5 tier-1 commits"
+_calls5=$(git_calls)
+payload "$TMP/mp" "git push origin big200" > "$TMP/mp-big200.json"
+: > "$TMP/git.calls"
+timed "$TMP/mp" "$TMP/mp-big200.json" 15 "$CNTGIT:$PATH"
+expect_clean_or_loaded "1 refspec of 200 tier-1 commits"
+_calls200=$(git_calls)
+printf 'info: git calls: 1 refspec of 5 commits %s, of 200 commits %s\n' "$_calls5" "$_calls200"
+[ "$_calls200" = "$_calls5" ] && ok || bad "1 refspec of 200 commits: $_calls200 git calls, want the same as 5 commits ($_calls5)"
+payload "$TMP/mp" "git push origin big30" > "$TMP/mp-big30.json"
+timed "$TMP/mp" "$TMP/mp-big30.json"
+expect_clean_or_loaded "1 refspec of 30 tier-1 commits"
+if [ "$SECS" -lt 4 ] || [ "$LOAD_HIGH" = 1 ]; then ok; else bad "1 refspec of 30 commits: took ${SECS}s at load $LOAD, want < 4s"; fi
+hook "$TMP/mp" "git push origin big-ai"
+expect "AI co-author in commit 150 of 200" 2 'big-ai credits an AI'
+hook "$TMP/mp" "git push origin big-sec"
+expect "secret in commit 150 of 200" 2 'big-sec looks like it holds a secret'
+# Several refspecs checked together: each still gets its own verdict, in order.
+hook "$TMP/mp" "git push origin y0; git push origin big-ai; git push origin y1"
+expect "batched pushes: AI co-author" 2 'big-ai credits an AI'
+hook "$TMP/mp" "git push origin y0; git push origin big-sec; git push origin big5"
+expect "batched pushes: secret" 2 'big-sec looks like it holds a secret'
+hook "$TMP/mp" "git push origin big-sec; git push origin big-ai"
+expect "batched pushes: the first block wins" 2 'big-sec looks like it holds a secret'
+case $ERR in *'credits an AI'*) bad "batched pushes: checks went on after the first block" "$ERR" ;; *) ok ;; esac
+hook "$TMP/mp" "git push origin y0; git push origin y1 feat/x"
+expect "batched pushes: tier 2" 2 'tier-2 change \(auth: src/auth/login.js\)'
+hook "$TMP/mp" "git push origin y0 y1:main; git push origin feat/x:main"
+expect "batched pushes: tier 2 onto the default branch" 2 'pushes onto the default branch main'
+printf 'commit refs/heads/orph\ncommitter Test Human <human@example.com> 1700000000 +0000\ndata <<EOM\nfeat: orphan\nEOM\nM 100644 inline o.js\ndata <<EOM\nexport const o = 1\nEOM\n' | git -C "$TMP/mp" fast-import --quiet
+hook "$TMP/mp" "git push origin y0; git push origin orph"
+expect "batched pushes: no common history" 1 'orph: risk tier unknown'
 payload "$TMP/mp" "$(many_cmd 20 'git push origin feat/x:b%d;')" > "$TMP/mp-20x.json"
 : > "$TMP/git.calls"
 timed "$TMP/mp" "$TMP/mp-20x.json" 15 "$CNTGIT:$PATH"
@@ -778,7 +853,7 @@ expect_fast "20 pushes, the first blocks" 10
 expect "20 pushes, the first blocks" 2 'branch: b0'
 case $ERR in *'branch: b1`'*) bad "20 pushes: checks went on after the first block" "$ERR" ;; *) ok ;; esac
 git_calls_at_most "20 pushes, the first blocks: no git call after it" 6
-# A slow git (1 s a call): the checks block at the deadline instead of letting the hook time out.
+# A slow git (2 s a call): the checks block at the deadline instead of letting the hook time out.
 : > "$TMP/git.sleep"
 timed "$TMP/mp" "$TMP/mp-20.json" 40 "$CNTGIT:$PATH"
 rm -f "$TMP/git.sleep"

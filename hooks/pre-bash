@@ -10,7 +10,9 @@
 #   git commit, git push     authorship gate, secrets gate         (gate-authorship.sh, gate-secrets.sh)
 #   git push deleting the default branch: blocked, left to the human (gate-tier2.sh)
 # A push is judged per refspec, on what it pushes (its source ref), not on HEAD; each pushed
-# commit is checked once. Every other command passes untouched (exit 0, no output).
+# commit is checked once, with one git log and one diff whatever the number of new commits, and
+# the refspecs of one command are checked together (a fixed number of git calls for all of them,
+# gate-tier2.sh rsc_push_batch). Every other command passes untouched (exit 0, no output).
 #
 # Bounded time: over 20 distinct gated calls in one command (push refspecs, PRs, merges, commits)
 # block at once ("split it"), the checks stop at the first block, and checks still running

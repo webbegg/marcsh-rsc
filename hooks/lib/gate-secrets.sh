@@ -22,5 +22,10 @@ gate_secrets_commit() {
 gate_secrets_diff() {
   [ -n "$3" ] || return 0
   _gs_hits=$(printf '%s\n' "$3" | awk -f "$LIB/secrets.awk") && return 0
-  block "${2:-git push}: the branch diff $RSC_DEFAULT_REF...$1 looks like it holds a secret ($_gs_hits). Remove it from the history before pushing, and rotate it if it was ever pushed."
+  gate_secrets_hits "$1" "$2" "$_gs_hits"
+}
+
+# gate_secrets_hits SRC WHAT HITS — the block for a push of SRC whose branch diff has HITS.
+gate_secrets_hits() {
+  block "${2:-git push}: the branch diff $RSC_DEFAULT_REF...$1 looks like it holds a secret ($3). Remove it from the history before pushing, and rotate it if it was ever pushed."
 }
