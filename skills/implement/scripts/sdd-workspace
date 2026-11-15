@@ -5,42 +5,62 @@
 # Usage: sdd-workspace [DIR_OVERRIDE]
 #   $1  optional explicit dir override; if provided, use that dir instead of auto-detecting.
 #
-# Auto-detection: if a 02-DOCS dir exists at repo root, use 02-DOCS/wiki/sdd/.scratch/
-# Otherwise fall back to ${TMPDIR:-/tmp}/rsc-sdd-scratch-<cksum of the project path>: one stable
-# dir per project (the git root, or the cwd outside a repository), so projects never share briefs.
+# Auto-detection: the project is the git root (outside a repository, the current folder). If a
+# 02-DOCS dir exists in the current folder or a parent of it up to the git root (never above
+# it), use <that folder>/02-DOCS/wiki/sdd/.scratch/.
+# Otherwise fall back to ${TMPDIR:-/tmp}/rsc-sdd-scratch-<uid>-<cksum of the project path>: one
+# stable dir per user and project, so projects never share briefs. Task briefs and review diffs
+# (which may hold secrets) go there, so on a shared /tmp it is used only when it is this user's
+# own directory, not a symlink, with mode 0700: it is created with `mkdir -m 700` (which fails
+# when the path exists) and then checked with `[ -O ] && [ ! -L ]` and its mode. When the check
+# fails (someone else prepared that path), a fresh `mktemp -d` dir is used instead, with a note
+# on stderr.
 
 set -e
 
-if [ -n "$1" ]; then
+# private_dir DIR — DIR is this user's own directory, not a symlink, with mode 0700.
+private_dir() {
+  [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] || return 1
+  [ "$(ls -ld "$1" 2>/dev/null | cut -c1-10)" = drwx------ ]
+}
+
+if [ -n "${1:-}" ]; then
   SCRATCH="$1"
+  mkdir -p "$SCRATCH"
 else
-  # Walk up from cwd to find repo root (where 02-DOCS lives), or just use cwd.
-  _find_repo_root() {
-    _dir="$PWD"
-    while [ "$_dir" != "/" ]; do
-      if [ -d "$_dir/02-DOCS" ]; then
-        printf '%s' "$_dir"
-        return 0
-      fi
-      _dir="$(dirname "$_dir")"
-    done
-    # Not found; return empty
-    printf ''
-  }
+  _TOP="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  # Walk up from cwd to the git root (never above it) looking for 02-DOCS; outside a
+  # repository only the current folder is looked at.
+  _ROOT=''
+  _dir="$PWD"
+  while :; do
+    _phys="$(cd "$_dir" && pwd -P)"
+    if [ -n "$_TOP" ]; then
+      case "$_phys/" in "$_TOP"/*) ;; *) break ;; esac
+    fi
+    if [ -d "$_dir/02-DOCS" ]; then
+      _ROOT="$_dir"
+      break
+    fi
+    [ -n "$_TOP" ] && [ "$_phys" != "$_TOP" ] && [ "$_dir" != / ] || break
+    _dir="$(dirname "$_dir")"
+  done
 
-  _ROOT="$(_find_repo_root)"
-
-  if [ -n "$_ROOT" ] && [ -d "$_ROOT/02-DOCS" ]; then
+  if [ -n "$_ROOT" ]; then
     SCRATCH="$_ROOT/02-DOCS/wiki/sdd/.scratch"
+    mkdir -p "$SCRATCH"
   else
-    # A stable name per project under TMPDIR, so repeated calls return the same path.
-    _PROJECT="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+    # A stable name per user and project under TMPDIR, so repeated calls return the same path.
+    _PROJECT="${_TOP:-$(pwd -P)}"
     _HASH="$(printf '%s' "$_PROJECT" | cksum | cut -d ' ' -f 1)"
-    SCRATCH="${TMPDIR:-/tmp}/rsc-sdd-scratch-${_HASH}"
+    SCRATCH="${TMPDIR:-/tmp}/rsc-sdd-scratch-$(id -u)-${_HASH}"
+    mkdir -m 700 "$SCRATCH" 2>/dev/null || :
+    if ! private_dir "$SCRATCH"; then
+      printf 'sdd-workspace: %s is not a private folder of this user (mode 0700, not a symlink); using a fresh one\n' "$SCRATCH" >&2
+      SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/rsc-sdd-scratch.XXXXXX")"
+    fi
   fi
 fi
-
-mkdir -p "$SCRATCH"
 
 # Drop a self-ignoring .gitignore so nothing in this dir is ever tracked.
 if [ ! -f "$SCRATCH/.gitignore" ]; then
