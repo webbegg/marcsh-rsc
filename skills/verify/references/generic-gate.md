@@ -50,22 +50,29 @@ minutes and hands the model a timeout error. A timed-out call is not a result: t
   quick git commands. Anything that reliably ends well inside 3 minutes.
 - **Background, or an explicit `timeout`:** the full or affected suite, builds, type-checks of a
   large project, audits, `scripts/verify.sh`, flake loops (`k/N` runs), `git bisect run`,
-  `gh pr checks --watch`, dev servers and watchers.
+  `gh pr checks --watch`.
   - On pi, start it with `bg_start`. Keep working on what does not depend on it; its exit status
     and the end of its output arrive by themselves, and `bg_status` shows them earlier. The full
     log path is in the result; read it when the end is not enough.
   - On Claude, use the engine's own background mode (the Bash tool's background option) and read
     the output when it has finished.
-  - Where there is no background mode (Plan, `marcsh run`, a background subagent, which cannot
+  - Where there is no background mode (headless `marcsh run`, a background subagent, which cannot
     start background terminals), give the call an explicit `timeout` above the expected run time.
     A command that sets its own `timeout` keeps it.
+- **Servers and watchers: background only.** They never exit, so a `timeout` does not fit them,
+  and `cmd &` inside a foreground call is never used. Where there is no background mode, do not
+  start one: record the runtime proof it was for as **not run**, with the reason.
+- **Plan runs no commands**, so none of this applies there.
+- **Subagents.** `Task` has no timeout parameter: the 3-minute rule for subagents is in
+  `../../asdd/references/marcsh.md` §2.
 - **The exit code comes from the background result** (its `exited (…)` line, or `was killed`). A
   killed or timed-out run is recorded as not run, with the reason, and run again properly.
-- **Runtime proof** (a page renders, an endpoint answers): `bg_start` the server, probe it in the
-  foreground (`curl`, the project's own e2e command, with a short retry until it listens), record
-  the probe's output, then `bg_kill` it. On Claude, start it in the background and stop it the
-  same way. Never leave a server running when the check is done; background terminals also stop
-  when the session closes. What else to stop and how to check: "Stop what you start" below.
+- **Runtime proof** (a page renders, an endpoint answers): start the server in the background
+  (`bg_start` on pi, the Bash tool's background option on Claude), probe it in the foreground
+  (`curl`, the project's own e2e command, with a short retry until it listens), record the probe's
+  output, then stop it (`bg_kill` on pi; on Claude, the engine's own tool for stopping a background
+  shell). Never leave a server running when the check is done; background terminals also stop when
+  the session closes. Leftovers: "Stop what you start" below.
 - `bg_start` asks for approval exactly like `bash` for the same command, and the pack's hooks apply
   to it too. It gets no stdin: never start a command that waits for input.
 - On an interactive pi session you may end the turn while background work runs: marcsh starts a
@@ -73,33 +80,12 @@ minutes and hands the model a timeout error. A timed-out call is not a result: t
 
 ## Stop what you start
 
-A process a check starts and nobody stops (a dev server, a browser, a watcher, `cargo run`, a
-`node` process) keeps using memory long after the proof is taken. marcsh marks every process its
-tools start with `MARCSH_SESSION` and shows the live ones to you and to the user (`/ps`, and
-`N leftover · /ps` in the status line); it stops nothing by itself.
-
-- **Start them in the background.** Servers, browsers, watchers and `cargo run`/`node` processes
-  go through `bg_start` on pi (the engine's background mode on Claude), never `cmd &` inside a
-  foreground call.
-- **Stop them once the proof is taken** (`bg_kill` on pi; on Claude, stop the background command
-  with the engine's own tool), unless the user asked to keep them running.
-- **Browsers (Playwright, Chrome).** Close the browser or context in the test code itself
-  (`browser.close()` in a `finally` or `afterAll`), then check: a run that crashed leaves the
-  browser and its helper processes behind.
-- **Check before you close.** Before closing a task, a turn or a verification that ran processes,
-  list the leftovers: `proc_list` on pi; on Claude `sh <verify skill dir>/scripts/leftovers` (the
-  file is `../scripts/leftovers` from this one; `--count` prints only the number). Stop the ones
-  this work started: `proc_stop` with their pids on pi, `sh <verify skill dir>/scripts/leftovers
-  --stop <pid>...` on Claude. Never stop one you cannot tie to this work; ask the user instead.
-- **Record it.** The evidence (the FTD feature document, the ASDD progress file, the verification
-  record) says "no leftover processes", or names what was kept running and why.
-- **Only this session's processes.** `proc_stop` takes only processes marked with this session;
-  `leftovers --stop` re-checks the marker of each pid right before signalling it and refuses any
-  other. If `proc_list` is not offered, use the script. If the script says `MARCSH_SESSION` is not
-  set (a marcsh without leftover tracking), the check is **not run**: say so, and stop by hand only
-  what you started yourself.
-- **macOS hides some of them.** The system hides the environment of Apple's own binaries (`sh`,
-  `sleep`) from the script, so it cannot see those; third-party programs such as `node` it can.
+The rule is in `../../asdd/references/marcsh.md` §7. In short: servers, browsers and watchers
+start only in the background and stop once the proof is taken; before closing a task, a turn or a
+verification that ran processes, list the leftovers (`proc_list` on pi, otherwise
+`sh <verify skill dir>/scripts/leftovers`, which is `../scripts/leftovers` from this file); never
+stop one without the user's yes; the record says "no leftover processes" or what still runs and
+why.
 
 ## Rules that still apply
 

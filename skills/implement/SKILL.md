@@ -38,20 +38,21 @@ back — you do not write feature code anyway.
    `testing.strict_tdd`, `testing.commands.apply`, `testing.commands.verify` and
    `sdd.review_budget`, and do not choose a different test command from memory. Without it (the
    normal case in this pack), take the commands from the project's manifests and say where you
-   found them; strict TDD is on and the review budget is 400 changed lines. Every command runs by the
-   long-command rule (`../verify/references/generic-gate.md`, "Long commands"): focused RED/GREEN
-   runs in the foreground, the suite, build and audit in the background or with an explicit
-   `timeout`.
+   found them; strict TDD is on and the review budget is 400 changed lines. Only focused RED/GREEN
+   runs go in the foreground; every other command follows the long-command rule
+   (`../verify/references/generic-gate.md`, "Long commands").
 3. **Choose the skills.** There is no skill registry here. If a stack skill is loaded, digest it
    into compact rules; otherwise follow the project's own conventions and record that fallback.
 4. **Read the register.** Open `02-DOCS/wiki/harness/user-profile.md` if it exists and read
    `technical_level`. It picks technical terms or plain words with analogies at each checkpoint
    (see "Checkpoints" below). No profile → use analogies, and ask before any irreversible step.
-5. **Confirm isolation.** Default branch looks open for this project → work on it. Looks closed
-   (CI, a team, a deployment, or the user said branches and PRs) → stop before the first commit
-   and ask with the question tool (`../asdd/references/marcsh.md` §3): this branch, a new one
-   (recommended), or the default branch? Record the answer verbatim in the progress file. Never branch on your own; another
-   session in this folder makes a separate worktree mandatory
+5. **Confirm isolation.** Every task ends in a commit, and marcsh blocks every commit on the
+   default branch. On the default branch → stop before the first change and ask with the question
+   tool (`../asdd/references/marcsh.md` §3) where the work runs: a new branch `<type>/<slug>`
+   (recommended) or a worktree (recommended instead when the folder holds changes you did not
+   make or the approval mode is paused). On another branch that is not this feature's → ask: this
+   branch or a new one. Record the answer verbatim in the progress file. Never branch on your own;
+   another session in this folder makes a separate worktree mandatory
    (`../asdd/references/without-rsc-cli.md` §6).
 6. **Scan the tasks for independence.** Mark which tasks share files/state and which are disjoint.
    Disjoint clusters are candidates for parallel subagents (below); everything else runs in order.
@@ -123,15 +124,10 @@ task, this first one included. Round 1 is the task's first review, not its first
 | 1 | one fresh-context reviewer, the `task-reviewer` subagent; inputs and dispatch in `references/per-task-review.md` |
 | 2 | the three lenses (`refuter-correctness` · `refuter-security` · `refuter-tests`) as `../review/SKILL.md` runs them, all three at once; then record the panel line in the progress file (`<task>: panel correctness, security, tests`). The pack's push hook checks it: enforced when the pack hooks are on; otherwise held by discipline. Wait for every reviewer inside the turn (`task_wait` on pi); never end the turn to ask whether to continue |
 
-"Fresh context" means a subagent that never saw the implementation conversation. Start the
-`<slug>` subagent with `Task` (`agent: "<slug>"`); give it exactly the inputs listed. To run
-several at once on pi use `background: true` and collect them with `task_wait` (cancel with
-`task_cancel`); on Claude issue the `Task` calls in parallel. If `Task` has no `agent` parameter
-(older marcsh), pass the subagent file's body as the prompt instead. Only when no subagent can be
-started at all, run the pass yourself and record that it was not independent; at tier 2 ask the
-user with the question tool whether that weaker check is enough (`../review/SKILL.md`, "Depth by
-risk"). On pi a foreground `Task` is stopped after 3 minutes, so start reviewers with
-`background: true` whenever the session offers it (`../asdd/references/marcsh.md` §2).
+"Fresh context" means a subagent that never saw the implementation conversation. Start each one
+by the dispatch rule in `../asdd/references/marcsh.md` §2 (on pi with `background: true`); at
+tier 2 a pass of your own instead is a weaker check the user accepts or not
+(`../review/SKILL.md`, "Depth by risk").
 
 Every reviewer gets the **spec**, the **diff as a file** (`scripts/review-package <BASE> <HEAD>`, BASE
 = the task's *recorded* base sha, never `HEAD~1`), the **surrounding code** at that sha (not just the
@@ -154,14 +150,12 @@ lasts beyond the progress file is the review-evals cases and rules `review` writ
 
 These are `verify`'s per-task mode (`../verify/SKILL.md`):
 
-Run them by the long-command rule (`../verify/references/generic-gate.md`, "Long commands"): the
-affected suite, the build and the audit go to `bg_start` (or the engine's background mode, or an
-explicit `timeout`), and the exit code comes from the background result.
+Run them by the long-command rule (`../verify/references/generic-gate.md`, "Long commands").
 
 - **Tests** — the affected suite, not just the new test (`testing.commands.apply`).
 - **Build** — the project compiles and type-checks.
 - **Security** — the stack's audit; a focused security pass of the diff when input, authz or secrets are touched.
-- **Processes** — stop what the task started (servers, browsers, watchers, `cargo run`/`node`) and check for leftovers before the task closes (`proc_list` on pi; on Claude the `verify` skill's `scripts/leftovers`), by the rule in `../verify/references/generic-gate.md`, "Stop what you start". The progress file records "no leftover processes" or what was kept and why.
+- **Processes** — stop what the task started and list the leftovers before the task closes; never stop one without the user's yes (`../asdd/references/marcsh.md` §7). The progress file records "no leftover processes" or what still runs and why.
 - **Traceability** — every new behaviour in the diff traces to a spec acceptance criterion.
   **Untraced behaviour is a finding.** This is the control that catches the unrequested feature: a
   QR nobody asked for passes every test.
@@ -190,11 +184,12 @@ entry per item: its kind, task id, tier, the question, the options, your recomme
 evidence path. **Kind is `blocking` or `review-after`.** Tier 2, a contradiction with a recorded
 decision and no convergence are `blocking`: the task is parked, its dependents wait, and the branch
 cannot merge itself. An assumption you took so work could continue is `review-after`: nothing waits
-and it does not stop a self-merge — the human reads it afterwards. Only a human closes an entry —
-an agent's approval never counts as human. When the user is there to answer, put each open entry
-to them with the question tool (its options and your recommendation, first;
-`../asdd/references/marcsh.md` §3) and record the answer verbatim under the entry before closing
-it.
+and it does not stop a self-merge — the human reads it afterwards. Only a human's answer closes an
+entry — an agent's approval never counts as human. When the user is there to answer, put each open
+entry to them with the question tool (its options and your recommendation, first;
+`../asdd/references/marcsh.md` §3). Then record the answer verbatim on an indented line under the
+entry and change only its tag from `[blocking]` to `[closed]` (`../asdd/SKILL.md`, "Park, don't
+block").
 
 Then append the progress entry and show the checkpoint (below).
 
@@ -238,7 +233,7 @@ Entry shape:
 - decision: parked in decision queue (tier 2)
 ```
 
-This file is what makes resumes and archive reliable. Never rewrite old entries; append corrections as new entries.
+This file is what makes resumes and archive reliable. Never rewrite old entries; append corrections as new entries. The one allowed edit: closing an answered decision-queue entry by changing its tag from `[blocking]` to `[closed]`.
 
 ### Resume & recovery — trust the ledger, not memory
 
@@ -269,14 +264,10 @@ test output. You merge the branches, then run the *combined* test suite before t
 green-in-isolation is not green-together (the combined suite runs in the background, by the
 long-command rule). Keep the TDD discipline inside each branch.
 
-**Dispatch to the `developer` subagent** (`../../agents/developer.md`, the frozen worker brief).
-Start the `developer` subagent with `Task` (`agent: "developer"`); give it exactly the inputs
-listed. To run several at once on pi use `background: true` and collect them with `task_wait`
-(cancel with `task_cancel`); on Claude issue the `Task` calls in parallel. If `Task` has no `agent`
-parameter (older marcsh), pass the subagent file's body as the prompt instead. Only when no
-subagent can be started at all, run the tasks one after another yourself; the loop is the same,
-and nothing in it needs a second agent. Say which you did in the progress entry. At most 4
-background subagents run at once on pi; queue the rest.
+**Dispatch to the `developer` subagent** (its worker brief is frozen in it) by the rule in
+`../asdd/references/marcsh.md` §2, with exactly the inputs listed. When it cannot be started, run
+the tasks one after another yourself; the loop is the same, and nothing in it needs a second
+agent. Say which you did in the progress entry.
 
 ### The dispatch contract (carriers, statuses, escalation)
 
@@ -295,9 +286,9 @@ each dispatch self-sufficient and make its return machine-checkable:
   only that task's files (`git add <files>`, never `-A`) under the human's git identity.
 - **The model.** The `developer` subagent sets no model, so it uses the session's. A worker run
   in the background cannot start background terminals: its brief tells it to give longer commands
-  an explicit `timeout` or leave them to you, and to stop what it starts and report its leftovers
-  (`../verify/references/generic-gate.md`, "Stop what you start"). When it returns, check
-  leftovers yourself as well.
+  an explicit `timeout` or leave them to you, to start no server, and to list its leftovers in
+  its result without stopping any. When every worker has returned, list the leftovers yourself
+  and stop them by the rule (`../asdd/references/marcsh.md` §7).
 - **The worker reports one of four statuses** (it does not guess when unsure):
   - `DONE` — done-check green, `Produces` contract met.
   - `DONE_WITH_CONCERNS` — green, but it flagged a risk/assumption for you to adjudicate.
@@ -366,7 +357,7 @@ outranks the plan, and the plan outranks your in-the-moment preference.
 - **Unresolved `analyze` findings** (contradiction between constitution ↔ spec ↔ plan ↔ tasks) →
   resolve them before any code; they will only get more expensive after the diff exists.
 - **A task forces a constitution violation** → surface it, stop, kick it back to `analyze`/`plan`.
-- **You're on the default branch** → stop before the first commit and ask with the question tool: branch or default branch (`../asdd/references/without-rsc-cli.md` §6).
+- **You're on the default branch** → stop before the first change and ask with the question tool: a new branch or a worktree; marcsh blocks every commit here (`../asdd/references/without-rsc-cli.md` §6).
 - **A test won't go red** for the right reason (import error, syntax) → stub the module, fix the test.
 - **The combined suite is red after a parallel merge** → do not checkpoint as done; debug with
   `debug` before continuing.

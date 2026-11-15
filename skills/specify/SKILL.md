@@ -205,18 +205,15 @@ blocked.
 
 The author's own context is blind to its own gaps — the same mind that wrote the spec self-reviews it
 with the same blind spots. For any spec beyond a small, low-risk one — and always for a **high-risk** spec (multi-subsystem, security/data,
-irreversible, or large scope), start the **`spec-reviewer` subagent** (`../../agents/spec-reviewer.md`,
-the frozen brief) to read the written spec cold, *before* the user-approval gate (step 9), and fold
-its findings in. Start the `spec-reviewer` subagent with `Task` (`agent: "spec-reviewer"`); give it
-exactly the inputs listed. On pi use `background: true` and collect it with `task_wait` (a
-foreground `Task` is stopped after 3 minutes). If `Task` has no `agent` parameter (older marcsh),
-pass the subagent file's body as the prompt instead. Only when no subagent can be started at all,
-do the cold read yourself as a separate pass, from the spec file and the constitution only, and
-record that it was not independent:
+irreversible, or large scope), start the **`spec-reviewer` subagent** (its brief is frozen in it) to read the written spec cold, *before* the user-approval gate (step 9), and fold
+its findings in. Start it with `Task` (`agent: "spec-reviewer"`) by the dispatch rule in
+`../asdd/references/marcsh.md` §2, with exactly the inputs listed; when it cannot run, the cold
+read is a separate pass of yours, from the spec file and the constitution only, recorded as not
+independent:
 
 - **Hand it only the spec file** (and the constitution), not your dialogue or reasoning — a fresh
   reviewer that inherits your context inherits your blind spots.
-- **Calibrated checklist** (in the subagent file): placeholders/TODOs, internal contradictions,
+- **Calibrated checklist** (in the subagent's brief): placeholders/TODOs, internal contradictions,
   ambiguity that would stall planning, unstated assumptions, scope creep, and YAGNI. It flags only
   what would cause a real problem at planning time and **approves unless there are serious gaps**.
 - **It returns** `Approved` or `Issues found` with a short list; you fix the real ones inline, then

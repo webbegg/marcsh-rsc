@@ -66,34 +66,23 @@ project's `CLAUDE.md` or `AGENTS.md`.
 - **Commands.** The user can enter the chain with the pack's commands: `/asdd <idea>`, `/spec`,
   `/plan`, `/build`, `/verify`, `/sdd-review`, `/ship`, `/queue`, `/autopilot <idea>`, `/resume`, and
   `/risk` for the tier of the current diff (`/ftd` and `/debug` run as FTD).
-- **Subagents.** The pack ships the reviewers and the worker as named subagents whose files are
-  the frozen briefs: `task-reviewer`, `refuter-correctness`, `refuter-security`, `refuter-tests`,
+- **Subagents.** The pack ships the reviewers and the worker as named subagents, each carrying
+  its frozen brief: `task-reviewer`, `refuter-correctness`, `refuter-security`, `refuter-tests`,
   `finding-verifier`, `spec-reviewer`, `developer`. Start one with `Task` (`agent: "<slug>"`) and
-  give it exactly the inputs the skill lists; never paraphrase its role. On pi run them with
-  `background: true` and collect them with `task_wait` (a foreground `Task` is stopped after 3
-  minutes); on Claude issue the `Task` calls in parallel. Only when no subagent can be started at
-  all, run the pass yourself and record that it was not independent; at tier 2 ask the user, with
-  the question tool, whether that is enough.
-- **Background work.** Full suites, builds, audits, `git bisect run`, `gh pr checks --watch` and
-  dev servers run with `bg_start` (on Claude, the engine's background mode) or an explicit
-  `timeout`; the exit code comes from the background result (`verify/references/generic-gate.md`,
-  "Long commands").
-- **Stop what you start.** Servers, browsers (Playwright/Chrome: close the browser in the test
-  code), watchers and `cargo run`/`node` processes go through `bg_start` (on Claude, the engine's
-  background mode) and are stopped with `bg_kill` once the proof is taken, unless the user asked
-  to keep them. Before closing a task, a turn or a verification that ran processes, check for
-  leftovers (`proc_list` on pi; on Claude `sh <verify skill dir>/scripts/leftovers`) and stop the
-  ones this work started (`proc_stop`, or `leftovers --stop <pid>...`). The progress file and the
-  verification record say "no leftover processes" or what was kept and why
-  (`verify/references/generic-gate.md`, "Stop what you start").
+  give it exactly the inputs the skill lists; never paraphrase its role. The dispatch rule
+  (background on pi, parallel on Claude, the 3-minute limit, the fallback) is
+  `asdd/references/marcsh.md` §2.
+- **Long commands.** Only focused tests and quick commands run in the foreground; everything else
+  follows `verify/references/generic-gate.md`, "Long commands".
+- **Processes.** Servers, browsers and watchers start only in the background and stop once the
+  proof is taken. Before closing a task, a turn or a verification that ran processes, list the
+  leftovers, and never stop one without the user's yes: `proc_stop` on pi (marcsh asks),
+  otherwise ask with the question tool, then `sh <verify skill dir>/scripts/leftovers --stop`. Subagents only report theirs; you
+  ask and stop after they return. The rule: `asdd/references/marcsh.md` §7.
 - **Questions.** Spec approval, the decision queue, landing options, a tier-2 merge and the other
   gates go through the question tool, recommendation first, the answer recorded verbatim.
-- **Hooks.** The pack's hooks block a tier-2 push or PR without a passing spec (linked by
-  `branch:`) and a panel line, an agent's tier-2 merge, `gh pr merge` with an open blocking entry,
-  AI authorship trailers and secrets in a commit or push. They are off until the user enables them
-  in `/agents`, and you cannot see whether they are on: enforced when the pack hooks are on;
-  otherwise held by discipline. rsc's sealed reviews and branch guards have no hook here; you hold
-  those lines alone, and say so plainly when a gate you are naming is not mechanically enforced.
+- **Hooks.** The pack's hooks back the tier-2, queue, authorship and secrets lines: enforced when
+  the pack hooks are on; otherwise held by discipline (`asdd/references/marcsh.md` §4).
 - **No rsc tool.** If a skill names an rsc call (`rsc risk`, `spec gate`, `review ledger`, `sello`,
   `main status`), use the manual equivalent in `asdd/references/without-rsc-cli.md`, or skip the call
   if it has none. Never run `npx` on the user's machine without asking: it downloads a package.
@@ -105,9 +94,15 @@ project's `CLAUDE.md` or `AGENTS.md`.
 
 - **Authorship is the human's.** Commits and PRs go under the configured git user. No `Co-Authored-By` for any AI, no "generated with" footer. If `git config user.email` is unset or a bot identity, stop and ask. (This is the source harness's rule, kept as written.)
 - **Outward or irreversible actions need the user's yes**: push, open a PR, merge, delete a branch. In autopilot the rules above decide pushing and PRs; discarding work is never automatic. (The Approval mode rule below can relax this for a commit in YOLO.)
-- **Approval mode.** marcsh tells you the session's approval mode in the system prompt each turn, and whether Plan is on: for example "Approval mode AUTO on feature branch <b>: …", "Approval mode YOLO on feature branch <b>: …", or "Approval mode AUTO|YOLO is paused: …". Older marcsh adds a line only for AUTO and YOLO, so no such line means normal. In Plan, write nothing and run nothing: read and plan only. In normal, every rule here stands. AUTO active: ordinary edits and commands need no chat confirmation, so do not ask before running them; commits and delivery keep the rules above. YOLO active: the same, and committing finished work on the current feature branch needs no chat yes; say in one line what was committed. Push, PR, creating or switching branches, worktrees and everything else keep the rules above; marcsh asks for remote and branch-leaving actions too. Paused: work as in normal. Before the first code change, propose starting the feature in a worktree, `git worktree add ../<repo>-worktrees/<slug> -b <type>/<slug>` (run it through marcsh's prompt, after the user's yes), then tell the user to open marcsh in that folder (`cd ../<repo>-worktrees/<slug> && marcsh`), because this session stays in its folder. If they prefer, a plain feature branch in this folder (`git switch -c <type>/<slug>`) also activates the mode. A tier-2 branch still waits for the spec gate and the human's yes to the merge. Never relaxed in any mode: merges (tier-2 merge approval included), spec approval and constitution ratification, deleting a branch or discarding work, force pushes, the git identity check, and anything marcsh still asks about. A commit on the default branch is denied in every mode.
+- **Approval mode.** marcsh tells you the mode each turn; the full rule is `asdd/references/marcsh.md` §5.
+  - Plan: write nothing, run nothing; read and plan only.
+  - Normal: every rule here stands.
+  - AUTO: do not ask in chat before ordinary edits and commands; commits and delivery keep the rules above.
+  - YOLO: as AUTO, and commit finished work on the current feature branch without a chat yes; say in one line what you committed.
+  - Paused: work as in normal and, before the first code change, propose a worktree (§5).
+  - Never relaxed: push, PR, branch and worktree changes, merges, spec approval and constitution ratification, deleting a branch or discarding work, force pushes, the git identity check, stopping a process. A tier-2 branch still waits for the spec gate and the human's yes to the merge. A commit on the default branch is blocked in every mode.
 - **Never read or write secrets** (`.env`, keys). Stub the boundary.
-- Never branch on your own; follow the branch rules in the `ftd` skill and `without-rsc-cli.md` section 6. (In paused AUTO or YOLO approval mode, see the Approval mode rule.)
+- Never branch on your own, and never commit on the default branch; follow the branch rules in `without-rsc-cli.md` section 6.
 
 ## How to talk
 

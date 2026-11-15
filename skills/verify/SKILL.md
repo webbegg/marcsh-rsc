@@ -63,9 +63,7 @@ If the spec or task list is missing, stop: there is nothing to verify against. S
 ### 2 — RUN the stack gate
 
 For each touched stack, run the project's gate and **capture the output verbatim**. Run it by the
-long-command rule (`references/generic-gate.md`, "Long commands"): a full gate goes to `bg_start` on
-pi (the engine's background mode on Claude) or gets an explicit `timeout`, and its exit code comes
-from the background result. A run stopped by the 3-minute limit is **not run**, never a pass:
+long-command rule (`references/generic-gate.md`, "Long commands"). A run stopped by the 3-minute limit is **not run**, never a pass:
 
 ```bash
 ./scripts/verify.sh            # if the project (or a loaded stack skill) has one; else the generic gate
@@ -114,7 +112,7 @@ The stack gate proves the code is *clean and tested*. It does **not** prove the 
 - **Task done-checks** — for each task in the plan, confirm its done-check is satisfiable from evidence (a passing test, a file that exists, an endpoint that returns the documented shape). Mark each ✅ with the evidence or ❌ with what's missing.
 - **Acceptance criteria** — for each criterion in the spec, point at the concrete evidence that satisfies it. A criterion with no test and no observable proof is **unverified** — treat it as a FAIL item, not a pass, until there is evidence. A criterion you "reviewed by reading the code" is not verified either: reading is `review`; verifying needs an observable result.
 
-Where a criterion needs runtime proof (a page renders, a command produces output), drive it through the relevant tool — the project's own run and browser tooling — rather than inventing a check here. A server it needs is started with `bg_start`, probed, and stopped with `bg_kill` when the probe is recorded (`references/generic-gate.md`, "Long commands"). Before the record is written, stop what this verification started and check for leftovers (`proc_list` on pi; on Claude `sh scripts/leftovers` from this skill's folder), by the rule in `references/generic-gate.md`, "Stop what you start".
+Where a criterion needs runtime proof (a page renders, a command produces output), drive it through the relevant tool — the project's own run and browser tooling — rather than inventing a check here. A server it needs is started in the background, probed, and stopped when the probe is recorded (`references/generic-gate.md`, "Long commands"). Before the record is written, stop what this verification started and list the leftovers, never stopping one without the user's yes (`../asdd/references/marcsh.md` §7).
 
 ### 4 — RECORD
 
@@ -150,7 +148,7 @@ source_state: 3f9a1c2 (clean)
 - `git revert <merge sha>`; migration `0042` has a tested down step; no flag involved.
 
 ## Processes
-- no leftover processes (`proc_list` after `bg_kill` of the dev server: none)
+- no leftover processes (`proc_list` after the dev server was stopped: none)
 
 ## Capas no ejecutadas
 - **NO-APLICA** — mutation: no logic module changed, only templates.

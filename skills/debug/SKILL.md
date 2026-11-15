@@ -33,14 +33,11 @@ the fix. Ask only what you can't observe yourself (e.g. exact error text). Confi
 changes behavior beyond the bug, with the question tool (`../asdd/references/marcsh.md` §3):
 "Fix only the bug" (recommended), "Also change <the behaviour>", and record the answer.
 
-Commands follow the long-command rule (`../verify/references/generic-gate.md`, "Long commands"):
-the single repro and the new test run in the foreground; flake loops (`k/N` runs), the surrounding
-suite and `git bisect run` go to `bg_start` (the engine's background mode on Claude) or get an
-explicit `timeout`, and their exit code comes from the background result. A repro that needs a
-server, a browser or a watcher starts it with `bg_start` and stops it (`bg_kill`) once the
-evidence is taken; before you report the fix, check for leftovers (`proc_list` on pi; on Claude
-`sh scripts/leftovers` from the `verify` skill's folder) and stop the ones the debugging started
-(`../verify/references/generic-gate.md`, "Stop what you start").
+Only the single repro and the new test run in the foreground; everything else follows the
+long-command rule (`../verify/references/generic-gate.md`, "Long commands"). A repro that needs a
+server, a browser or a watcher starts it in the background and stops it once the evidence is
+taken; before you report the fix, list the leftovers and never stop one without the user's yes
+(`../asdd/references/marcsh.md` §7).
 
 ## The loop — five steps, never skipped, never reordered
 
@@ -80,7 +77,9 @@ The cause is somewhere in a large space; cut it in half, repeatedly, with eviden
 
 - **Across history:** `git bisect` between a known-good and known-bad commit to land on the exact
   change that introduced it. Let the repro be the bisect's good/bad oracle. `git bisect run
-  <repro>` runs in the background (`bg_start`); finish with `git bisect reset`.
+  <repro>` runs by the long-command rule: in the background (`bg_start` on pi, the Bash tool's
+  background option on Claude) or with an explicit `timeout`, never a plain foreground call;
+  finish with `git bisect reset`.
 - **Across code:** disable/short-circuit half the suspect path; see which half keeps the symptom.
 - **Across inputs/data:** shrink the failing input to the minimal case that still fails.
 - **One variable per step.** Two changes at once and you've learned nothing about either. Write down

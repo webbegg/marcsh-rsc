@@ -10,7 +10,7 @@ origin: risco
 Tests prove the code works, not that it does what was asked. Review answers that other question: **is the diff correct, well-scoped and faithful to the spec — or did it pass for the wrong reasons?** In ASDD (`../asdd/SKILL.md`) it runs in two modes:
 
 - **Per task** — called from `implement`'s loop after each task's self-check. Depth comes from the risk tier, computed by hand from the path table and content signals in `../asdd/references/without-rsc-cli.md` §1: **tier 0** → no review; **tier 1** → one fresh-context reviewer (the `task-reviewer` subagent, which never saw the implementation conversation); **tier 2** → the three-refuter panel below, recorded after it runs as a panel line in the progress file (`<task>: panel correctness, security, tests`; the pack's push hook refuses to push or open a PR for a tier-2 branch without it — enforced when the pack hooks are on; otherwise held by discipline — and one reviewer is not a panel), and the branch will wait for human approval at ship. The tier reads the diff's content too: auth code in a generic file is tier 2.
-- **Closing review** — once, before `ship`: the whole branch against the spec. Forty individually-correct tasks can still fail to be the feature together: a criterion nobody owned, two tasks that each assumed the other handled an edge, scope that crept in a slice at a time. Read the spec's acceptance criteria and "must respect" list against `git diff <base>...HEAD`, not the task reviews. Its record — tier, counts, verdict, each finding with its outcome — goes to `02-DOCS/wiki/sdd/reviews/<slug>.md`.
+- **Closing review** — once, before `ship`: the whole branch against the spec. Forty individually-correct tasks can still fail to be the feature together: a criterion nobody owned, two tasks that each assumed the other handled an edge, scope that crept in a slice at a time. Read the spec's acceptance criteria and "must respect" list against `git diff <base>...HEAD`, not the task reviews. At tier 1 the reviewer is the `task-reviewer` subagent in closing mode (`mode: closing`), given the spec, the whole branch diff against the default branch as a file (`../implement/scripts/review-package $(git merge-base <default> HEAD) HEAD`) and the verification record; at tier 2, the three lenses with their four inputs on the same diff. Its record — tier, counts, verdict, each finding with its outcome — goes to `02-DOCS/wiki/sdd/reviews/<slug>.md`.
 
 This skill owns **two roles that share one discipline**:
 
@@ -120,18 +120,14 @@ reaches you (docs/copy pass silently); tier 1 → **one fresh-context reviewer**
 subagent (`../implement/references/per-task-review.md`); tier 2 → **three parallel fresh-context
 subagents**, one per lens: `refuter-correctness`, `refuter-security`, `refuter-tests`, each
 briefed to *refute* readiness, not confirm it. Fresh context is the point: a reviewer who inherits
-the implementer's context inherits its blind spots. The closing review is always at least tier 1.
+the implementer's context inherits its blind spots. The closing review is always at least tier 1,
+with `task-reviewer` in closing mode (above).
 
-The briefs live in the subagent files (`../../agents/refuter-*.md`, `../../agents/finding-verifier.md`):
+The briefs are frozen in the subagents themselves (the `refuter-*` lenses, `finding-verifier`):
 what each lens attacks, the blind record, the findings JSON and the `VERDICT:` line. Never write
-your own version of them. **Dispatch:** start each `<slug>` subagent with `Task`
-(`agent: "<slug>"`); give it exactly the inputs listed. To run several at once on pi use
-`background: true` and collect them with `task_wait` (cancel with `task_cancel`); on Claude issue
-the `Task` calls in parallel. If `Task` has no `agent` parameter (older marcsh), pass the subagent
-file's body as the prompt instead. Only when no subagent can be started at all, run the pass
-yourself and record that it was not independent. Start the three lenses together and wait for all
-three inside the turn (`task_wait` until each result is in); never end the turn to ask whether to
-continue.
+your own version of them. **Dispatch** by the rule in `../asdd/references/marcsh.md` §2, with
+exactly the inputs listed. Start the three lenses together and wait for all three inside the turn
+(`task_wait` until each result is in); never end the turn to ask whether to continue.
 
 At tier 2 a pass run by you instead of a subagent is a weaker check: ask the user with the question
 tool (`../asdd/references/marcsh.md` §3) whether it is enough, options "Accept the weaker review",
