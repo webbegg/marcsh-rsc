@@ -1,0 +1,9 @@
+#!/bin/sh
+# risk-tier [--base <ref>] [--head <ref>] [--committed] — the risk tier (0/1/2) of a diff, by the
+# path table and content signals of skills/asdd/references/without-rsc-cli.md §1. Prints
+# `tier=<n>` (or `tier=none`), `base=<ref>` and one `reason=` line per match. No network.
+#
+# The implementation is hooks/lib/risk-tier: marcsh's plugin view (where hooks run) holds only
+# skills/, commands/ and hooks/, so the hooks cannot reach this folder. This wrapper is for use
+# from a checkout of the pack.
+exec sh "$(dirname -- "$0")/../hooks/lib/risk-tier" "$@"

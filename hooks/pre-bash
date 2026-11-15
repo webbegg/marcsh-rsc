@@ -1,0 +1,105 @@
+#!/bin/sh
+# pre-bash — the marcsh-rsc PreToolUse hook on Bash (on pi: the bash and bg_start tools).
+#
+# Reads the hook payload (JSON) on stdin, finds the git/gh calls in tool_input.command and runs
+# the gates for them (hooks/lib/):
+#   git push, gh pr create   tier-2 spec + panel gate              (gate-tier2.sh, needs 02-DOCS)
+#   gh pr merge              tier-2 merge gate, decision queue     (gate-tier2.sh, needs 02-DOCS)
+#   git merge into default   tier-2 merge gate                     (gate-tier2.sh, needs 02-DOCS)
+#   git commit, git push     authorship gate, secrets gate         (gate-authorship.sh, gate-secrets.sh)
+# Every other command passes untouched (exit 0, no output).
+#
+# Exit 2 blocks the call; the reasons go to stderr, where the model reads them. Exit 1 (a note on
+# stderr) never blocks: it reports a check that could not run. An unreadable payload or command
+# allows. Read-only: no file is written, no network is used, no jq is needed (json-get.awk reads
+# the payload). On pi a PreToolUse hook that times out or cannot start blocks the call, so the
+# work stays small: one awk pass for any command, a handful of git calls for a gated one.
+
+LC_ALL=C
+export LC_ALL
+
+case $0 in
+  */*) HOOK_DIR=${0%/*} ;;
+  *) HOOK_DIR=. ;;
+esac
+case $HOOK_DIR in /*) ;; *) HOOK_DIR=$PWD/$HOOK_DIR ;; esac
+LIB=$HOOK_DIR/lib
+TAB=$(printf '\t')
+BLOCKS=''
+NOTES=''
+
+block() {
+  case $BLOCKS in *"$1"*) return 0 ;; esac
+  BLOCKS="$BLOCKS- $1
+"
+}
+
+note() {
+  case $NOTES in *"$1"*) return 0 ;; esac
+  NOTES="$NOTES- $1
+"
+}
+
+finish() {
+  if [ -n "$BLOCKS" ]; then
+    {
+      printf 'Blocked by the marcsh-rsc pack hooks:\n%s' "$BLOCKS"
+      [ -z "$NOTES" ] || printf 'Also:\n%s' "$NOTES"
+    } >&2
+    exit 2
+  fi
+  if [ -n "$NOTES" ]; then
+    printf 'marcsh-rsc pack hooks (nothing blocked):\n%s' "$NOTES" >&2
+    exit 1
+  fi
+  exit 0
+}
+
+# One awk pass: the payload's command and cwd, then the gated calls in the command.
+ACTIONS=$(awk -f "$LIB/json-get.awk" -f "$LIB/msg-check.awk" -f "$LIB/parse-command.awk" -f "$LIB/payload.awk")
+case $? in
+  0) ;;
+  3) note "could not read the hook payload (not JSON); nothing checked"; finish ;;
+  *) note "could not read the command (the hook's reader failed); nothing checked"; finish ;;
+esac
+[ -n "$ACTIONS" ] || exit 0
+
+. "$LIB/git.sh"
+. "$LIB/risk-tier.sh"
+. "$LIB/gate-authorship.sh"
+. "$LIB/gate-secrets.sh"
+. "$LIB/gate-tier2.sh"
+
+while IFS=$TAB read -r _kind _dir _a _b; do
+  [ -n "$_kind" ] || continue
+  # Not in a work tree (or a path the reader could not resolve, like $VAR): git itself refuses.
+  rsc_context "$_dir" || continue
+  case $_kind in
+    commit)
+      gate_secrets_commit "$_a"
+      gate_authorship_file "$_dir" "$_b"
+      ;;
+    commit-bad)
+      block "git commit: the message credits an AI ($_a). Commits ship under the responsible person's name only (ship skill, the hard rule); remove that line and commit again."
+      ;;
+    push)
+      gate_authorship_push
+      gate_secrets_push
+      gate_spec_panel "git push"
+      ;;
+    pr-create)
+      gate_spec_panel "gh pr create"
+      ;;
+    pr-merge)
+      gate_pr_merge "$_dir" "$_a"
+      gate_queue "$_dir" "$_a"
+      ;;
+    merge)
+      gate_git_merge "$_dir" "$_a"
+      ;;
+  esac
+done << EOF
+$ACTIONS
+EOF
+
+finish
