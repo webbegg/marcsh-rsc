@@ -30,7 +30,13 @@ never changes with the register — only the words do.
 
 In short plain sentences, show: the confirmed cause, one line of *why* it produced this symptom, and
 the fix. Ask only what you can't observe yourself (e.g. exact error text). Confirm before a fix that
-changes behavior beyond the bug.
+changes behavior beyond the bug, with the question tool (`../asdd/references/marcsh.md` §3):
+"Fix only the bug" (recommended), "Also change <the behaviour>", and record the answer.
+
+Commands follow the long-command rule (`../verify/references/generic-gate.md`, "Long commands"):
+the single repro and the new test run in the foreground; flake loops (`k/N` runs), the surrounding
+suite and `git bisect run` go to `bg_start` (the engine's background mode on Claude) or get an
+explicit `timeout`, and their exit code comes from the background result.
 
 ## The loop — five steps, never skipped, never reordered
 
@@ -69,7 +75,8 @@ A bug you cannot reproduce is not a bug you can fix; it's a rumor. Pin it down:
 The cause is somewhere in a large space; cut it in half, repeatedly, with evidence.
 
 - **Across history:** `git bisect` between a known-good and known-bad commit to land on the exact
-  change that introduced it. Let the repro be the bisect's good/bad oracle.
+  change that introduced it. Let the repro be the bisect's good/bad oracle. `git bisect run
+  <repro>` runs in the background (`bg_start`); finish with `git bisect reset`.
 - **Across code:** disable/short-circuit half the suspect path; see which half keeps the symptom.
 - **Across inputs/data:** shrink the failing input to the minimal case that still fails.
 - **One variable per step.** Two changes at once and you've learned nothing about either. Write down

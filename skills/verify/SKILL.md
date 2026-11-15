@@ -62,7 +62,10 @@ If the spec or task list is missing, stop: there is nothing to verify against. S
 
 ### 2 — RUN the stack gate
 
-For each touched stack, run the project's gate and **capture the output verbatim**:
+For each touched stack, run the project's gate and **capture the output verbatim**. Run it by the
+long-command rule (`references/generic-gate.md`, "Long commands"): a full gate goes to `bg_start` on
+pi (the engine's background mode on Claude) or gets an explicit `timeout`, and its exit code comes
+from the background result. A run stopped by the 3-minute limit is **not run**, never a pass:
 
 ```bash
 ./scripts/verify.sh            # if the project (or a loaded stack skill) has one; else the generic gate
@@ -111,7 +114,7 @@ The stack gate proves the code is *clean and tested*. It does **not** prove the 
 - **Task done-checks** — for each task in the plan, confirm its done-check is satisfiable from evidence (a passing test, a file that exists, an endpoint that returns the documented shape). Mark each ✅ with the evidence or ❌ with what's missing.
 - **Acceptance criteria** — for each criterion in the spec, point at the concrete evidence that satisfies it. A criterion with no test and no observable proof is **unverified** — treat it as a FAIL item, not a pass, until there is evidence. A criterion you "reviewed by reading the code" is not verified either: reading is `review`; verifying needs an observable result.
 
-Where a criterion needs runtime proof (a page renders, a command produces output), drive it through the relevant tool — the project's own run and browser tooling — rather than inventing a check here.
+Where a criterion needs runtime proof (a page renders, a command produces output), drive it through the relevant tool — the project's own run and browser tooling — rather than inventing a check here. A server it needs is started with `bg_start`, probed, and stopped with `bg_kill` when the probe is recorded (`references/generic-gate.md`, "Long commands").
 
 ### 4 — RECORD
 
@@ -159,7 +162,7 @@ source_state: 3f9a1c2 (clean)
 
 **`source_state:` is not decoration.** A verdict belongs to the commit it was measured against, not to the project: without it, nobody can tell whether the record describes the code that shipped. Record the short SHA plus `clean` or `dirty` — a dirty tree means the record describes bytes that exist on no commit, which is worth knowing when someone reads it three weeks later.
 
-**All numbers come from one fresh run made after the last edit.** A figure from mid-task is stale and does not go in the record, however true it was when you saw it.
+**All numbers come from one fresh run made after the last edit**, read from its background result or log, never from a run that timed out. A figure from mid-task is stale and does not go in the record, however true it was when you saw it.
 
 **Every not-run check is listed, labelled.** Split "didn't run" three ways, because one `SKIP` list collapses three different confidence claims and they read identically:
 

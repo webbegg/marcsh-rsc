@@ -60,7 +60,7 @@ Gather what you cannot infer, then draft. Ask in one short batch — only the qu
 7. **Performance budgets** (where they matter) — a named budget, not "should be fast".
 8. **Documentation & knowledge** — what must be written down (decisions log, the wiki) and when.
 
-For any significant either/or (e.g. "strict types or gradual?", "squash or merge commits?"), use the **"always 3 options"** shape where it applies: gather the constraint, present up to 3 honest options with a recommendation matched to the team's level, then ratify the choice and log it.
+For any significant either/or (e.g. "strict types or gradual?", "squash or merge commits?"), use the **"always 3 options"** shape where it applies (as a question-tool question, `../asdd/references/marcsh.md` §3): gather the constraint, present up to 3 honest options with a recommendation matched to the team's level, then ratify the choice and log it.
 
 ## Fixed principles (always present)
 
@@ -89,7 +89,7 @@ With the constitution, draft `REVIEW.md` at the project root (the code repo — 
 - **What failure looks like here** — the defect classes that actually hurt this project (e.g. "a query without the tenant filter", "a migration that is not reversible").
 - **Paths to skip** — generated code, vendored files, fixtures.
 - **Nit cap** — the most nits one review may report (e.g. 3); the rest are dropped.
-- **Always-human paths** — what must never merge without a person (billing, auth, infra). The risk procedure (`../asdd/references/without-rsc-cli.md` §1) reads this list and treats every path on it as tier 2. marcsh runs no hooks, so nothing blocks a merge mechanically: the agent holds the line, and the user should know that.
+- **Always-human paths** — what must never merge without a person (billing, auth, infra). The risk procedure (`../asdd/references/without-rsc-cli.md` §1) reads this list and treats every path on it as tier 2. The pack's hooks block an agent's tier-2 merge when the user has enabled them, but they read their own path table, not this list: for these paths the agent holds the line, and the user should know that.
 - **Summary starts with a count** — "3 findings: 1 blocker, 2 nits", before anything else.
 
 `review` adds to it when a finding keeps repeating; amend it like the constitution, never silently.
@@ -100,7 +100,7 @@ The constitution is versioned so `analyze` and `review` can cite "constitution v
 
 - **Semantic-ish versioning.** MAJOR when a principle is removed or reversed (breaks existing work); MINOR when a principle is added or materially tightened; PATCH for wording/clarity with no behavior change.
 - **Amendments are append-only in the log.** Never silently edit a ratified principle — strike it (mark superseded) and add the new one, bump the version, and record date + why in the amendment log.
-- **Ratification.** A new or amended constitution is shown to the user and ratified explicitly before it takes effect. "Ratify" is an explicit yes on the shown draft; walk each change only if the user asks.
+- **Ratification.** A new or amended constitution is shown to the user and ratified explicitly before it takes effect. "Ratify" is an explicit yes on the shown draft, asked as its own question-tool question (`../asdd/references/marcsh.md` §3: "Ratify", "Change something"), and the answer is recorded verbatim in the amendment log; walk each change only if the user asks.
 - **In autopilot** (`execution_mode: automatic`, or an up-front "take it all the way"), there is no one to ask: ratify **provisionally** (`status: provisional` in the frontmatter), log it in `decisions.md`, and add a `review-after` entry to the decision queue (`../asdd/SKILL.md`) so the human confirms it later. It does not block the run or a self-merge.
 - **Downstream notice.** When a principle changes mid-project, flag that existing specs/plans may now be inconsistent — `analyze` will catch the drift on the next run.
 
@@ -125,7 +125,7 @@ The constitution is versioned so `analyze` and `review` can cite "constitution v
 - [ ] The Definition-of-Done checklist is present (what `verify` runs against).
 - [ ] Fixed principles included: human git authorship + decisions logged.
 - [ ] `02-DOCS/wiki/sdd/constitution.md` written with version + ratified date + amendment log.
-- [ ] `REVIEW.md` drafted at the project root; always-human paths listed in it, and the user told they are held by the agent, not by a hook.
+- [ ] `REVIEW.md` drafted at the project root; always-human paths listed in it, and the user told they are held by the agent, not by the pack hooks.
 - [ ] The constitution is indexed in `02-DOCS/wiki/index.md` (the Knowledge map) under the `sdd/` topic.
 - [ ] The constitution was shown to the user and explicitly ratified — or, in autopilot, ratified provisionally with a `review-after` queue entry.
 

@@ -35,7 +35,7 @@ If, having looked, there is no real objection, **say so in one line and move on 
 
 **And the objection never blocks.** It is a divergence, not a veto: the user often holds context you do not — a business reason, a conversation elsewhere, a constraint nobody wrote down. If they choose to proceed anyway, do not re-argue. **Write the reason into the spec** and continue. That is what keeps this from being decorative without giving it power it should not have: it cannot stop the decision, it can only stop the decision from being tacit. If the thing later goes wrong, the record says the doubt was raised and overridden — not that nobody looked.
 
-**Offer autopilot once, right here.** At this boundary, propose how to run the rest of the chain:
+**Offer autopilot once, right here.** At this boundary, propose how to run the rest of the chain, as one question-tool question (`../asdd/references/marcsh.md` §3) with two options, "Take it all the way" and "Stop at each phase", your recommendation first; record the answer verbatim in `decisions.md`:
 > *"¿Quieres que lo lleve hasta el final yo solo — spec → plan → código → verify, parando solo si algo es ambiguo — o prefieres que pare a que apruebes en cada fase?"*
 
 A **yes engages autopilot** (`../asdd/SKILL.md`): you still write the spec and every artifact, but you auto-advance through the phases without re-asking — that up-front yes is the approval that satisfies the hard gate above, for the whole run. A **no** (or silence) keeps the default gated flow: write the spec, hand to `clarify`/`plan`, stop for approval before code. Either way the spec gets written; autopilot only changes whether you pause *between* phases — and it still stops for genuine ambiguity, hard failures, or destructive/outward actions (ship still confirms). If `sdd.autopilot: true` in config, autopilot is the default — still surface it once.
@@ -80,7 +80,7 @@ The failure mode of specs is the wall of twenty questions. The cure is not one q
 
 1. **Infer first.** Read the `constitution` (`02-DOCS/wiki/sdd/constitution.md`), the existing wiki, and sibling specs. Fill every section you reasonably can from what already exists.
 2. **Ask only the gaps that change the contract.** A gap earns a question only if a different answer would move scope, a goal, a user, or an acceptance criterion. Cosmetic gaps become typed *points to clarify*, not questions.
-3. **Ask the whole frontier in one round.** The frontier is every remaining gap whose prerequisites are already settled — the questions you can ask *now* without guessing at answers you have not heard yet. Number them, give each your recommended answer, then wait. Where the harness offers a native question selector, use it; where it does not, emit the same round as numbered text.
+3. **Ask the whole frontier in one round.** The frontier is every remaining gap whose prerequisites are already settled — the questions you can ask *now* without guessing at answers you have not heard yet. Number them, give each your recommended answer, then wait. Use the question tool (`../asdd/references/marcsh.md` §3): up to four questions per call, each with its options and your recommendation first; a larger frontier takes several calls in the same round. Where no question tool answers (a headless run), emit the same round as numbered text.
 4. **Never cross a dependency.** A gap whose answer depends on another question open in *this* round belongs to a later round. Recompute the frontier after every set of answers: settled decisions push it outward and unblock what waited on them. If an answer redefines a question you already emitted in the same round, discard that question out loud and re-ask it next round rather than using an answer given under a premise that just moved.
 5. **Facts are your job; decisions are the user's.** When a frontier question needs a fact from the environment, go find it — and do not block on it. A running search is an unsettled prerequisite, so only the questions downstream of it wait; ask the rest of the frontier now.
 6. **When inference and asking both fail, type it.** Anything unresolved becomes a typed entry in *Points to clarify* — the handoff contract to `clarify`, not a defect.
@@ -163,7 +163,8 @@ Run these in order. It is a collaborative dialogue, not a form you fill in silen
                             constraints · known vs assumed; "don't build it" enumerated as a direction
 4. ASK the frontier       → only gaps that change the contract; whole frontier per round, numbered, each
                             with your recommendation; never cross a dependency; wait, record, recompute
-5. PROPOSE 2-3 approaches → distinct directions with honest trade-offs; lead with your recommendation and why
+5. PROPOSE 2-3 approaches → distinct directions with honest trade-offs; lead with your recommendation and why;
+                            the user picks with the question tool, one option per approach
 6. PRESENT the design     → section by section (problem, users, behaviour, acceptance), scaled to complexity;
                             after EACH section ask "does this look right?" and adjust before moving on
 7. WRITE the spec         → 02-DOCS/wiki/sdd/specs/<slug>.md (WHAT/WHY), index it in 02-DOCS/wiki/index.md
@@ -192,25 +193,32 @@ Run the spec gate on the spec you just wrote, by hand: the checklist in
 sections, and say what the gate does **not** check — the unmarked assumption is yours to catch,
 because no checklist can. A red gate means the spec is not closed: name the section that failed and
 fix it before step 9. (Where the user has Node and says yes, `npx @ericrisco/rsc spec gate <path>`
-does the same check; it downloads a third-party package, so ask first.)
+does the same check; it downloads a third-party package, so ask first, with the question tool.)
 
-When the work already lives on a branch, put `branch: <name>` in the spec's frontmatter. For a tier-2 change, rsc's ship guard refuses push and PR until a spec linked to the branch passes the gate; marcsh has no guard, so you hold that line yourself.
+**Record the branch.** Put `branch: <name>` in the spec's frontmatter as soon as the work has a
+branch, and update it if the branch changes. For a tier-2 change the pack's push hook refuses push
+and PR until a spec with that `branch:` line passes the gate: enforced when the pack hooks are on;
+otherwise held by discipline. A spec without the line cannot be found by the hook, so the push is
+blocked.
 
 ### Fresh-eyes spec review (step 8, scaled to the stakes)
 
 The author's own context is blind to its own gaps — the same mind that wrote the spec self-reviews it
 with the same blind spots. For any spec beyond a small, low-risk one — and always for a **high-risk** spec (multi-subsystem, security/data,
-irreversible, or large scope), dispatch a **fresh-context subagent** to read the written spec cold,
-*before* the user-approval gate (step 9), and fold its findings in. If your engine cannot start a
-subagent, say so and do the cold read as a separate pass, from the spec file and the constitution
-only; it is a weaker check and the record should say it was not an independent context:
+irreversible, or large scope), start the **`spec-reviewer` subagent** (`../../agents/spec-reviewer.md`,
+the frozen brief) to read the written spec cold, *before* the user-approval gate (step 9), and fold
+its findings in. Start the `spec-reviewer` subagent with `Task` (`agent: "spec-reviewer"`); give it
+exactly the inputs listed. On pi use `background: true` and collect it with `task_wait` (a
+foreground `Task` is stopped after 3 minutes). If `Task` has no `agent` parameter (older marcsh),
+pass the subagent file's body as the prompt instead. Only when no subagent can be started at all,
+do the cold read yourself as a separate pass, from the spec file and the constitution only, and
+record that it was not independent:
 
 - **Hand it only the spec file** (and the constitution), not your dialogue or reasoning — a fresh
   reviewer that inherits your context inherits your blind spots.
-- **Calibrated checklist:** placeholders/TODOs, internal contradictions, ambiguity that would stall
-  planning, unstated assumptions, scope creep, and YAGNI (asked-for-but-unneeded). Tell it to *only
-  flag issues that would cause a real problem at planning time* and to **approve unless there are
-  serious gaps** — a fresh reviewer that nitpicks everything is as useless as no reviewer.
+- **Calibrated checklist** (in the subagent file): placeholders/TODOs, internal contradictions,
+  ambiguity that would stall planning, unstated assumptions, scope creep, and YAGNI. It flags only
+  what would cause a real problem at planning time and **approves unless there are serious gaps**.
 - **It returns** `Approved` or `Issues found` with a short list; you fix the real ones inline, then
   proceed to step 9.
 
@@ -229,6 +237,11 @@ Questions and approval are two exchanges, in that order:
 ```text
 ask → user answers → fold it in → say what changed → show the revised spec → ask for approval
 ```
+
+Ask for approval with the question tool, as a question of its own (`../asdd/references/marcsh.md`
+§3): "Approve this spec as written?", options "Approve", "Change something" and "Reject". Record
+the answer verbatim, with the date, in the spec's `## Revisions` (and `status: approved`), so the
+words that approved it can be quoted.
 
 - **The recommended-option shape is where this fails most easily.** When the user picks the option
   you recommended, the spec *looks* unchanged and consent *looks* implied. Neither is true — you

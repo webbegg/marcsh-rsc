@@ -111,7 +111,9 @@ inline. Ask only about constraints you cannot infer.
 ## Always propose isolation before the build
 
 Once the plan is written, **always propose isolating the work on its own branch** (or a worktree)
-before any code is implemented — every feature, not just the risky ones. One line:
+before any code is implemented — every feature, not just the risky ones. One question-tool
+question (`../asdd/references/marcsh.md` §3), options "New branch" (recommended), "Worktree" and
+"Stay on this branch":
 
 > *"Before implementing, shall I isolate this work on its own branch so your current one stays
 > untouched? (recommended)"*

@@ -20,10 +20,10 @@ This is absolute — not a preference to weigh against convenience — because a
 Concretely, before any commit or PR:
 
 - **Never** pass `--author` to set another author. The repo's configured `user.name` / `user.email` — the responsible person — is the author and committer.
-- If `git config user.email` is unset or is an agent/bot identity, **stop and ask** which identity to commit under — do not guess, and do not substitute an agent identity.
+- If `git config user.email` is unset or is an agent/bot identity, **stop and ask** which identity to commit under (the question tool, `../asdd/references/marcsh.md` §3, with "Other" for a typed identity) — do not guess, and do not substitute an agent identity.
 - If you find a Claude/AI trailer in a commit you are about to push (e.g. left over from an upstream tool), **strip it** before the branch lands.
 
-Verify it after writing the commit. A non-empty match is a blocker: amend and re-check before the branch goes anywhere.
+Verify it after writing the commit. A non-empty match is a blocker: amend and re-check before the branch goes anywhere. The pack's authorship hook blocks such a commit or push: enforced when the pack hooks are on; otherwise held by discipline.
 
 ```bash
 git log -1 --format='%an <%ae>%n%n%b' | grep -iE 'co-authored-by.*(claude|anthropic|ai)|generated with|claude code' \
@@ -44,10 +44,10 @@ Run this before presenting the landing options. Any unchecked item is a stop —
 - [ ] **Review verdict is APPROVE / APPROVE WITH NITS** (not CHANGES REQUESTED, not absent).
 - [ ] **Working tree is clean** — `git status --short` is empty. No stray edits sneaking into the merge.
 - [ ] **On a feature branch, not the trunk** — `git rev-parse --abbrev-ref HEAD` is not `main`/`master`. If work landed directly on the trunk, that is its own problem; flag it, don't paper over it.
-- [ ] **Rebased / up to date with the base, and tested there** — branch is on top of latest `main`; conflicts resolved locally, not punted to the merge; the checks re-ran on the rebased branch.
+- [ ] **Rebased / up to date with the base, and tested there** — branch is on top of latest `main`; conflicts resolved locally, not punted to the merge; the checks re-ran on the rebased branch (in the background, by the long-command rule in `../verify/references/generic-gate.md`).
 - [ ] **Risk tier known** — computed for `git diff --name-only main...HEAD` by the table in `../asdd/references/without-rsc-cli.md` §1; its tier, classes and human-approval line go into the PR's Risk section.
 - [ ] **No `blocking` entry in the decision queue** (`## Decision queue` in `progress/<slug>.md`) — or the PR says which remain and it does not self-merge. `review-after` entries never block; they are listed in the PR body (or the parked summary) for the human.
-- [ ] **No secrets in the diff** — scan the staged/branch diff for keys, tokens, `.env` values (`git diff main... | grep -iE 'api[_-]?key|secret|password|token|BEGIN .*PRIVATE KEY'`). A hit is a blocker; remove it, and rotate it if it was ever pushed.
+- [ ] **No secrets in the diff** — scan the staged/branch diff for keys, tokens, `.env` values (`git diff main... | grep -iE 'api[_-]?key|secret|password|token|BEGIN .*PRIVATE KEY'`). A hit is a blocker; remove it, and rotate it if it was ever pushed. The pack's secrets hook blocks such a commit or push: enforced when the pack hooks are on; otherwise held by discipline.
 - [ ] **Authorship is the responsible person** — `git config user.email` is the configured human; no AI trailer in any commit on the branch (run the grep above across `main..HEAD`).
 - [ ] **Commit history is intelligible** — squashed or organized so the history reads as deliberate, not "wip wip fix fix".
 
@@ -70,19 +70,25 @@ does** (behaviour, not files), **what the checks proved** (which tests, criteria
 judgement no test encodes. The last part is the point: it tells the human where to look. It also
 goes into the PR's Testing section.
 
-### No automated guard here — you hold the line
+### What the pack hooks hold, and what you hold
 
-When rsc is installed for Claude Code, hooks enforce this phase: one denies any command that
-switches to `main`/`master` or merges while the feature branch has uncommitted changes or unpushed
-commits, and the sello denies commit, push and PR unless the change's exact bytes match a sealed,
-approved review. marcsh runs no hooks, so **none of that exists here**. The same rules still
-apply, by discipline: do not leave a feature branch with uncommitted or unpushed work, do not push
-or open a PR on bytes that differ from the reviewed ones, and say plainly in the explainer that
-nothing but you stood between this branch and the trunk.
+The pack ships hooks that check `Bash` commands before they run (`../asdd/references/marcsh.md`
+§4). When the user has enabled them in `/agents`, they block: a tier-2 push or PR without a passing
+spec linked by `branch:` and a panel line; a tier-2 merge by the agent; `gh pr merge` while a
+`blocking` entry is open; an AI authorship trailer; a secret in the diff. They are off until the
+user enables them, and you cannot see whether they are on, so every one of these lines is also
+held by discipline.
+
+rsc's other guards have no hook here: the one that denies switching to `main`/`master` or merging
+while the feature branch has uncommitted or unpushed work, and the sello that ties commit, push and
+PR to the exact bytes of an approved review. Those you hold alone: do not leave a feature branch
+with uncommitted or unpushed work, do not push or open a PR on bytes that differ from the reviewed
+ones, and say plainly in the explainer which gates were yours to hold. A hook block is the answer,
+not an obstacle: fix its cause, never reach the same effect another way.
 
 ## The three landing options — always present exactly three
 
-This mirrors the "always 3 options" pattern. Gather the one fact that changes the answer (does this repo use PRs / require review on `main`?), then present **exactly three** with an honest recommendation matched to the workflow, in the user's register.
+This mirrors the "always 3 options" pattern. Gather the one fact that changes the answer (does this repo use PRs / require review on `main`?), then present **exactly three** with an honest recommendation matched to the workflow, in the user's register: one question-tool question (`../asdd/references/marcsh.md` §3), the recommended option first. Record the answer verbatim in `decisions.md`. Picking "Discard" there is not enough to delete: it still needs the typed confirmation below.
 
 | Option | What it does | Choose it when |
 | --- | --- | --- |
@@ -103,7 +109,7 @@ Recommend based on repo signals: protected `main` or an existing PR culture (loo
 Read the `Review Workload Forecast` in the plan, and `02-DOCS/wiki/sdd/config.yaml` if the user has one.
 
 - `single-pr` keeps option 2 as one PR.
-- `ask-on-risk` pauses when the forecast exceeds the review budget and asks before landing a large diff.
+- `ask-on-risk` pauses when the forecast exceeds the review budget and asks (the question tool: one PR, stacked PRs, or split first) before landing a large diff.
 - `autochain` uses stacked PRs when tasks are reviewable in dependency order.
 - `exception` permits a larger single PR only when the user explicitly accepts the review risk.
 
@@ -132,7 +138,7 @@ git push origin --delete feature/<slug> 2>/dev/null || true
 
 Use `--no-ff` so the feature is one legible merge commit tied to the spec. Confirm the trunk still builds after the merge if the repo has a local gate (defer the actual run to `verify`).
 
-**Cleanup is yours to run here.** rsc retires a landed worktree and its branch with a `post-merge` hook; marcsh has no hooks, so after the work lands you do it, in the same turn, and check that it happened (`git worktree list`, `git branch --merged`). Remove only a worktree and branch that you created or that the user named, and only once the work is in the trunk. Anything holding unsaved work (`git status` in the worktree) stays, with the reason said. Name the path when you remove a worktree: with two streams running, removing by guess is how shipping A deletes B.
+**Cleanup is yours to run here.** rsc retires a landed worktree and its branch with a `post-merge` hook; this pack's hooks do not clean up, so after the work lands you do it, in the same turn, and check that it happened (`git worktree list`, `git branch --merged`). Remove only a worktree and branch that you created or that the user named, and only once the work is in the trunk. Anything holding unsaved work (`git status` in the worktree) stays, with the reason said. Name the path when you remove a worktree: with two streams running, removing by guess is how shipping A deletes B.
 
 ### Option 2 — pull request
 
@@ -176,7 +182,10 @@ Decision queue: <open `blocking` entries, or none> · Review after: <each `revie
 → you may self-merge (autopilot): `gh pr merge --squash --delete-branch` (or `--merge` to preserve the
 history; squash when the branch history is noisy, preserve when each commit is meaningful). **Tier
 2 waits for human approval** — a human's approving review on the PR, or their explicit yes in the
-conversation. An agent's approval never counts as a human's: no refuter, reviewer subagent or bot
+conversation, asked as its own question-tool question ("Merge PR #<n> now?") and recorded
+verbatim. When the pack hooks are on, the agent's tier-2 merge is blocked whatever the answer: the
+human merges in the forge. CI green means a finished check run: watch it with
+`gh pr checks --watch` in the background (`bg_start`), never in a foreground call. An agent's approval never counts as a human's: no refuter, reviewer subagent or bot
 review stands in for it, however clean.
 
 Once it is merged, pull the trunk — `git switch main && git pull --ff-only` — then clean up as above. A squashed pull request does not show as merged to git (`git branch --merged` will not list it), so check the PR state instead; keep the local branch until the user agrees to delete it, because `git branch -D` is not recoverable and while the branch exists the work is.
@@ -224,7 +233,7 @@ In short plain sentences: the explainer, the checklist result in one line, the t
 | "I'll add `Co-Authored-By: Claude` / a 'Generated with Claude Code' footer to be transparent" | It forges the record. The work is the responsible person's — no AI trailer, ever. Strip it. |
 | "Review didn't formally approve but it's obviously fine" | No verdict = not ready. Ship runs on APPROVE only. Route back to review. |
 | "Tier 2, but the three lenses approved — I'll self-merge" | An agent's approval never counts as a human's. Tier 2 waits for human approval. |
-| "Tier 2, one reviewer was enough here" | rsc's push gate wants the panel recorded; here you hold that line. Run the three lenses, record the panel line in the progress file, then push. |
+| "Tier 2, one reviewer was enough here" | The pack's push hook wants the panel recorded (enforced when the pack hooks are on; otherwise held by discipline). Run the three lenses, record the panel line in the progress file, then push. |
 | "The tree has a couple of stray edits, they're harmless" | A dirty tree means the merge is not the reviewed diff. Clean it or stash it first. |
 | "`main` is protected but I'll just force-merge, I'm sure" | Protected means PR. Don't bypass the gate the repo deliberately set. |
 | "No remote and the guard denies the merge — I'll merge another way" | The denial is the answer. Park the branch with the merge command for the human. |
@@ -245,6 +254,7 @@ Ship is mostly git actions, but the outcome is recorded so the knowledge model s
   - `verification.md` — copy or link to the verification record.
   - `review.md` — review verdict and nits.
   - `state.yaml` — `shipped`, `parked` or `discarded`, PR/merge refs, date.
+  - `transcript.md` — optional: suggest the user type `/export md <archive folder>/transcript.md` to keep the session record (`../asdd/references/marcsh.md` §6).
 
 Archive after option 1/2 lands, and also after option 3 parks/discards so paused or abandoned work is remembered.
 

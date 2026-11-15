@@ -1,9 +1,11 @@
 # Working without the rsc CLI
 
 Adapted for marcsh. The rsc harness runs a command line tool (`npx @ericrisco/rsc ...`) and hooks
-around these skills. marcsh runs none of the hooks and this pack does not install the tool. Every
-check the skills name is done by hand here, with the same rules. Nothing below needs onboarding,
-`.rsc/` or `.rsc.json`.
+around these skills. This pack does not install the tool, and its own hooks cover only some of
+rsc's gates (the tier-2 push, PR and merge gates, the blocking queue, authorship and secrets; see
+`marcsh.md` §4): enforced when the pack hooks are on; otherwise held by discipline. Every check the
+skills name is done by hand here, with the same rules. Nothing below needs onboarding, `.rsc/` or
+`.rsc.json`.
 
 Each section says what the rsc call did and how to do it yourself. Where the call works on its own,
 that is said too, as an optional shortcut.
@@ -15,7 +17,8 @@ and `review ledger` (plus `review escapes`). They were checked against the rsc s
 repository with no `.rsc.json`. Two details: `risk` needs paths on the command line or a base
 branch with commits, and `review ledger` writes `.rsc/review-ledger.jsonl` in the project (local,
 not meant to be committed). Run them only if the user has Node, says yes, and accepts that `npx`
-downloads a third-party package from npm on first use. Never run them silently. If any of that is
+downloads a third-party package from npm on first use. Ask with the question tool (`marcsh.md`
+§3), the manual form as the recommended option. Never run them silently. If any of that is
 missing, use the manual forms below. The manual forms are the default.
 
 Calls that need the rsc install and have no use here: `sello` (freeze, approve, block, budget,
@@ -73,10 +76,11 @@ example: `tier 2 (auth: src/login/handler.ts; password hash added in src/app.js)
 user's project lists extra always-human paths (in `REVIEW.md` or the constitution), treat them as
 tier 2. With nothing to classify, say so; do not default to 0.
 
-**What marcsh cannot do.** In rsc, a tier-2 branch cannot be pushed until a spec passes the gate
-and a panel is recorded. marcsh runs no hooks, so nothing stops the push. You hold the line: at
-tier 2, do not push, open a PR or merge until the spec exists, the three lenses ran and the user
-said yes to the merge.
+**The push gate.** A tier-2 branch cannot be pushed or opened as a PR until a spec linked to it
+(`branch:`) passes the gate and a panel is recorded, and the agent cannot merge it: enforced when
+the pack hooks are on; otherwise held by discipline. You hold the line either way: at tier 2, do not
+push, open a PR or merge until the spec exists, the three lenses ran and the user said yes to the
+merge.
 
 ## 2. Spec gate (replaces `rsc spec gate`)
 
@@ -93,7 +97,8 @@ report PASS or FAIL per item.
 3. Each entry in Points to clarify carries one of the four types.
 4. Each acceptance criterion is binary and observable.
 5. If the work is on a branch, put `branch: <name>` in the frontmatter, so the spec can be linked
-   to it.
+   to it. The pack's push hook finds the spec for the current branch by this line; without it a
+   tier-2 push is blocked when the hooks are on.
 
 Report in the form `FAIL <slug>: missing section(s): ...; empty section(s): ...`. A red result
 means the spec is not closed. As in rsc, this does not catch an unmarked assumption; that part is
@@ -113,8 +118,9 @@ The ledger keeps the fix loop from running forever. Keep it by hand in
 - **Outcome.** When a finding closes, append its outcome: `fixed`, `false`, `intentional`,
   `irrelevant` or `parked` (its task went to the decision queue).
 - **Panel record (tier 2).** After the three lenses ran, append
-  `<task>: panel correctness, security, tests`. This replaces the recorded panel the rsc push gate
-  checks. Without it, a tier-2 task is not reviewed.
+  `<task>: panel correctness, security, tests`, exactly so: the pack's push hook looks for this
+  line (enforced when the pack hooks are on; otherwise held by discipline). Without it, a tier-2
+  task is not reviewed.
 - **Stats** are a count of the outcomes above, if the user wants the false rate.
 
 ## 4. Consolidating reports (replaces `rsc review consolidate`)
@@ -152,8 +158,9 @@ such switch, so ask.
 
 - Work that writes only docs, wiki or config needs no question.
 - On the default branch (`main`, `master`), before the first code change of a feature ask in one
-  line: "Do it on this branch (`<current>`), on a new branch, or on `<default>` directly?" Recommend
-  a new branch when the project has CI, a deployment or several people. Wait for the answer. (In
+  line, with the question tool (`marcsh.md` §3): "Do it on this branch (`<current>`), on a new
+  branch, or on `<default>` directly?" Recommend a new branch when the project has CI, a deployment
+  or several people, and put it first. Wait for the answer and record it. (In
   paused AUTO or YOLO approval mode, recommend a worktree; see the agent's Approval mode rule.)
 - Already on another branch: an unrelated change does not go into it without asking.
 - Never switch the branch under another session working in the same folder. If you see signs of

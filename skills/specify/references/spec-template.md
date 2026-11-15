@@ -14,6 +14,7 @@ tags: [sdd, spec]
 timestamp: YYYY-MM-DDTHH:MM:SSZ
 topic: sdd
 slug: <slug>
+branch: <the branch the work runs on; add it as soon as there is one>
 status: draft
 ---
 
