@@ -114,7 +114,7 @@ The stack gate proves the code is *clean and tested*. It does **not** prove the 
 - **Task done-checks** — for each task in the plan, confirm its done-check is satisfiable from evidence (a passing test, a file that exists, an endpoint that returns the documented shape). Mark each ✅ with the evidence or ❌ with what's missing.
 - **Acceptance criteria** — for each criterion in the spec, point at the concrete evidence that satisfies it. A criterion with no test and no observable proof is **unverified** — treat it as a FAIL item, not a pass, until there is evidence. A criterion you "reviewed by reading the code" is not verified either: reading is `review`; verifying needs an observable result.
 
-Where a criterion needs runtime proof (a page renders, a command produces output), drive it through the relevant tool — the project's own run and browser tooling — rather than inventing a check here. A server it needs is started with `bg_start`, probed, and stopped with `bg_kill` when the probe is recorded (`references/generic-gate.md`, "Long commands").
+Where a criterion needs runtime proof (a page renders, a command produces output), drive it through the relevant tool — the project's own run and browser tooling — rather than inventing a check here. A server it needs is started with `bg_start`, probed, and stopped with `bg_kill` when the probe is recorded (`references/generic-gate.md`, "Long commands"). Before the record is written, stop what this verification started and check for leftovers (`proc_list` on pi; on Claude `sh scripts/leftovers` from this skill's folder), by the rule in `references/generic-gate.md`, "Stop what you start".
 
 ### 4 — RECORD
 
@@ -148,6 +148,9 @@ source_state: 3f9a1c2 (clean)
 
 ## Rollback plan
 - `git revert <merge sha>`; migration `0042` has a tested down step; no flag involved.
+
+## Processes
+- no leftover processes (`proc_list` after `bg_kill` of the dev server: none)
 
 ## Capas no ejecutadas
 - **NO-APLICA** — mutation: no logic module changed, only templates.

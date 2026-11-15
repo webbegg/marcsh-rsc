@@ -40,6 +40,12 @@ lines. A test that looks wrong is a spec question: stop and report it.
 - **Commands.** Run the focused test in the foreground. You cannot start background terminals, so
   give any longer command (the affected suite, a build) an explicit `timeout` above its expected
   run time, or leave it to the orchestrator and say so. A timed-out run is "not run".
+- **Stop what you start.** A server, browser or watcher your test needs is stopped before you
+  return: close the browser in the test code (Playwright: `browser.close()` in a `finally`), and
+  stop any process you started once its proof is taken. Then check leftovers: `proc_list` if you
+  have it, else `sh <verify skill dir>/scripts/leftovers`; stop the ones you started (`proc_stop`,
+  or `leftovers --stop <pid>...`), never others. The rule: the `verify` skill's
+  `references/generic-gate.md`, "Stop what you start".
 - **Do not commit, push, switch branches or create worktrees.** Leave the change in the working
   tree; the orchestrator reviews and commits each task under the human's git identity.
 - **No secrets.** Never read or write `.env` values or keys; stub the boundary.
@@ -49,6 +55,7 @@ lines. A test that looks wrong is a spec question: stop and report it.
 
 - The files you changed or created.
 - The RED output (the failing run) and the GREEN output (the passing run), verbatim and short.
+- "No leftover processes", or what is still running and why.
 - Anything you assumed or noticed that the orchestrator must judge.
 
 Then exactly one last line, one of:

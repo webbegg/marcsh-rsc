@@ -21,13 +21,14 @@ agent is selected. Load the one that fits instead of working from memory:
 - `review`, `verify`, `debug`: the reviewer, the evidence gate, and root-cause diagnosis.
 - `asdd` and the phase skills (`constitution`, `specify`, `clarify`, `plan`, `tasks`, `analyze`, `implement`, `ship`): the full chain, for when a task escalates.
 - `asdd/references/without-rsc-cli.md`: how to compute the risk tier, run the spec gate and keep the review ledger by hand.
-- `asdd/references/marcsh.md`: how this pack uses marcsh (long commands, subagents, the question tool, the pack hooks, the approval mode, `/diff`, `/undo`, `/export`, `/compact`).
+- `asdd/references/marcsh.md`: how this pack uses marcsh (long commands, subagents, the question tool, the pack hooks, the approval mode, `/diff`, `/undo`, `/export`, `/compact`, leftover processes).
 
 The user can start a turn with the pack's commands: `/ftd <ask>` and `/debug <symptom>` run as FTD; `/spec`, `/plan`, `/build`, `/verify`, `/sdd-review`, `/ship`, `/queue`, `/autopilot`, `/resume` and `/asdd` run as ASDD; `/risk` gives the tier of the current diff.
 
 ## marcsh tools you use
 
 - **Long commands.** On pi a foreground command or subagent is stopped after 3 minutes. Focused tests run in the foreground; full suites, builds, audits, `git bisect run`, `gh pr checks --watch` and dev servers go to `bg_start` (on Claude, the engine's background mode) or get an explicit `timeout`, and the exit code comes from the background result. The rule: `verify/references/generic-gate.md`, "Long commands".
+- **Stop what you start.** Servers, browsers (Playwright/Chrome: close the browser in the test code), watchers and `cargo run`/`node` processes go through `bg_start` (on Claude, the engine's background mode) and are stopped with `bg_kill` once the proof is taken, unless the user asked to keep them. Before closing a task or a turn that ran processes, check for leftovers (`proc_list` on pi; on Claude `sh <verify skill dir>/scripts/leftovers`) and stop the ones this work started (`proc_stop`, or `leftovers --stop <pid>...`). The Evidence says "no leftover processes" or what was kept and why. The rule: `verify/references/generic-gate.md`, "Stop what you start".
 - **Subagents.** The pack ships named subagents: `task-reviewer` (tier-1 review), `refuter-correctness`, `refuter-security`, `refuter-tests` (the tier-2 lenses), `finding-verifier`, `spec-reviewer` and `developer`. Start one with `Task` (`agent: "<slug>"`) and give it exactly the inputs its skill lists; on pi run reviewers with `background: true` and collect them with `task_wait`.
 - **Questions.** Decisions the user takes go through the question tool, your recommendation first, and the answer is recorded verbatim.
 - **Session commands the user types.** `/diff` shows the whole change of the session; `/undo` puts back the files of the last turn (the rollback route before a commit); `/export` saves the transcript; `/compact` before resuming a long run. Point the user to them where they help; you cannot run them.

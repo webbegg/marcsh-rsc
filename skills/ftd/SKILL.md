@@ -69,7 +69,11 @@ The lane inherits ASDD's per-task loop, cut to its floor:
    tests run in the foreground; a full suite, build or audit by the long-command rule
    (`../verify/references/generic-gate.md`, "Long commands"). Tell the user they can see the whole
    change with `/diff`, and that `/undo` puts back the files of a turn that went wrong before it
-   was committed (`../asdd/references/marcsh.md` §6).
+   was committed (`../asdd/references/marcsh.md` §6). Stop what the check started (servers,
+   browsers, watchers, `cargo run`/`node`), check for leftovers (`proc_list` on pi; on Claude
+   `sh scripts/leftovers` from the `verify` skill's folder) and record "no leftover processes" or
+   what was kept and why under Evidence (`../verify/references/generic-gate.md`, "Stop what you
+   start").
 2. **Risk tier** — the tier of what changed, from the path table and content signals in
    `../asdd/references/without-rsc-cli.md` §1. State it in one line with the reason.
 3. **Tier ≥ 1 → one fresh-context reviewer**: the `task-reviewer` subagent, with the feature

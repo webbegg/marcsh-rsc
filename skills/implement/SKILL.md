@@ -161,6 +161,7 @@ explicit `timeout`), and the exit code comes from the background result.
 - **Tests** — the affected suite, not just the new test (`testing.commands.apply`).
 - **Build** — the project compiles and type-checks.
 - **Security** — the stack's audit; a focused security pass of the diff when input, authz or secrets are touched.
+- **Processes** — stop what the task started (servers, browsers, watchers, `cargo run`/`node`) and check for leftovers before the task closes (`proc_list` on pi; on Claude the `verify` skill's `scripts/leftovers`), by the rule in `../verify/references/generic-gate.md`, "Stop what you start". The progress file records "no leftover processes" or what was kept and why.
 - **Traceability** — every new behaviour in the diff traces to a spec acceptance criterion.
   **Untraced behaviour is a finding.** This is the control that catches the unrequested feature: a
   QR nobody asked for passes every test.
@@ -294,7 +295,9 @@ each dispatch self-sufficient and make its return machine-checkable:
   only that task's files (`git add <files>`, never `-A`) under the human's git identity.
 - **The model.** The `developer` subagent sets no model, so it uses the session's. A worker run
   in the background cannot start background terminals: its brief tells it to give longer commands
-  an explicit `timeout` or leave them to you.
+  an explicit `timeout` or leave them to you, and to stop what it starts and report its leftovers
+  (`../verify/references/generic-gate.md`, "Stop what you start"). When it returns, check
+  leftovers yourself as well.
 - **The worker reports one of four statuses** (it does not guess when unsure):
   - `DONE` — done-check green, `Produces` contract met.
   - `DONE_WITH_CONCERNS` — green, but it flagged a risk/assumption for you to adjudicate.

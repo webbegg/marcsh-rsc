@@ -1,8 +1,8 @@
 # Using marcsh's tools
 
 The skills name a few marcsh features at the points where the method needs them. This file states
-each one once: long commands, subagents, questions, the pack hooks, the approval mode, and the
-session commands the user can type. Features marked *pi* exist only in pi sessions; on Claude, the
+each one once: long commands, subagents, questions, the pack hooks, the approval mode, the
+session commands the user can type, and leftover processes. Features marked *pi* exist only in pi sessions; on Claude, the
 engine's own equivalent is named.
 
 ## 1. Long commands
@@ -114,3 +114,31 @@ The model cannot run these; point the user to them where they help, one line eac
   to audit.
 - **`/compact`** compacts the conversation. Suggest it before resuming a long `implement` run;
   after it, rebuild state from `progress/<slug>.md` and `git log`, never from memory.
+
+## 7. Processes
+
+The rule is in `../../verify/references/generic-gate.md`, section "Stop what you start": servers,
+browsers, watchers and `cargo run`/`node` processes go through `bg_start` and are stopped with
+`bg_kill` once the proof is taken, unless the user asked to keep them; before closing a task, a
+turn or a verification that ran processes, check for leftovers and stop the ones this work
+started; the evidence says "no leftover processes" or what was kept and why.
+
+- **What marcsh gives.** Every process marcsh's tools start carries `MARCSH_SESSION=<id>` in its
+  environment (on pi `bash` often `MARCSH_CALL=<tool call id>` too). The user sees the live ones
+  in `/ps` ("Leftover processes", `x` stops one) and the status line counts them (`N leftover ·
+  /ps`). Nothing is stopped automatically; background terminals still stop when the session is
+  left or marcsh quits.
+- **On pi** (*pi*): `proc_list` lists this session's live leftover processes (pid, command, age,
+  memory); `proc_stop` with a list of pids stops only this session's marked processes. `proc_list`
+  works in Plan; `proc_stop` does not.
+- **On Claude**, and on pi when `proc_list` is not offered: `sh <verify skill dir>/scripts/leftovers`
+  (the `verify` skill's `scripts/leftovers`, `../../verify/scripts/leftovers` from this file)
+  lists the same processes, one line each (`pid  age  rssMB  command`); `--count` prints only the
+  number; `--stop <pid>...` re-checks each pid's marker, sends TERM, waits up to 2 s, then KILL,
+  and refuses any pid without the marker. Claude's Bash children inherit the marker, so the script
+  sees what they started.
+- **Limits.** `proc_list` and `proc_stop` need marcsh with leftover tracking (the next marcsh
+  release). Without it `MARCSH_SESSION` is not set and the script says so: the check is not run;
+  stop by hand only what you started yourself. On macOS the system hides the environment of
+  Apple's own binaries (`sh`, `sleep`) from the script, so it cannot see those; third-party
+  programs such as `node` it can.

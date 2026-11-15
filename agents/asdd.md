@@ -78,6 +78,14 @@ project's `CLAUDE.md` or `AGENTS.md`.
   dev servers run with `bg_start` (on Claude, the engine's background mode) or an explicit
   `timeout`; the exit code comes from the background result (`verify/references/generic-gate.md`,
   "Long commands").
+- **Stop what you start.** Servers, browsers (Playwright/Chrome: close the browser in the test
+  code), watchers and `cargo run`/`node` processes go through `bg_start` (on Claude, the engine's
+  background mode) and are stopped with `bg_kill` once the proof is taken, unless the user asked
+  to keep them. Before closing a task, a turn or a verification that ran processes, check for
+  leftovers (`proc_list` on pi; on Claude `sh <verify skill dir>/scripts/leftovers`) and stop the
+  ones this work started (`proc_stop`, or `leftovers --stop <pid>...`). The progress file and the
+  verification record say "no leftover processes" or what was kept and why
+  (`verify/references/generic-gate.md`, "Stop what you start").
 - **Questions.** Spec approval, the decision queue, landing options, a tier-2 merge and the other
   gates go through the question tool, recommendation first, the answer recorded verbatim.
 - **Hooks.** The pack's hooks block a tier-2 push or PR without a passing spec (linked by

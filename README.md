@@ -32,6 +32,7 @@ Neither agent sets a `model`: the session model is used.
 Both agents use marcsh's own features where the method needs them (`skills/asdd/references/marcsh.md`):
 
 - **Long commands in the background.** Focused tests run in the foreground; full suites, builds, audits, `git bisect run`, `gh pr checks --watch` and dev servers go to `bg_start` on pi (the engine's background mode on Claude) or get an explicit `timeout`, so the 3-minute limit never turns a check into a false result. The rule is in `skills/verify/references/generic-gate.md`.
+- **Stop what you start.** Servers, browsers, watchers and `cargo run`/`node` processes go to `bg_start` and are stopped once the proof is taken; before closing a task, a turn or a verification, the agent checks for leftover processes (`proc_list` on pi; on Claude the pack script `skills/verify/scripts/leftovers`, which lists the processes carrying this session's `MARCSH_SESSION` marker) and stops the ones the work started (`proc_stop`, `leftovers --stop <pid>...`). The evidence records "no leftover processes" or what was kept and why. The rule is in `skills/verify/references/generic-gate.md`, "Stop what you start".
 - **Named subagents** for every independent check: `task-reviewer` (tier 1), the three refuters (tier 2) and `finding-verifier`, run in parallel with background `Task` and `task_wait` on pi, and `developer` for parallel-safe tasks.
 - **Multiple-choice questions** at each decision: the lane when intent is unclear, where the work runs, the autopilot offer, clarify's questions, spec approval, decision-queue answers, landing options, a tier-2 merge, a weaker tier-2 review. The answer is recorded verbatim.
 - **The approval mode.** marcsh tells the agent the session's approval mode each turn; the agents follow it (see Limits).
@@ -73,12 +74,14 @@ hooks/hooks.json, hooks/pre-bash   PreToolUse checks on Bash (and bg_start on pi
 hooks/lib/                         the hooks' POSIX sh and awk helpers, including sdd-root and risk-tier
 scripts/                           checkout-only wrappers for hooks/lib/sdd-root and risk-tier (an installed
                                      pack exposes only skills/, commands/ and hooks/, so skills don't call them)
-tests/                             the hook and script tests (sh tests/run.sh)
+tests/                             the hook and script tests (sh tests/run.sh) and the leftovers
+                                     script tests (sh tests/leftovers.sh)
 skills/ftd/                        the FTD lane
 skills/asdd/                       the dispatcher, plus references/without-rsc-cli.md and references/marcsh.md (new)
 skills/suggest/                    the lane decisor only (trimmed)
 skills/constitution/ specify/ clarify/ plan/ tasks/ analyze/
 skills/implement/ verify/ review/ ship/ debug/
+skills/verify/scripts/leftovers    lists or stops this session's leftover processes (POSIX sh, no network)
 .claude-plugin/plugin.json
 ```
 
@@ -134,6 +137,7 @@ The skills call `npx @ericrisco/rsc ...`. Each call was checked against rsc 4.1.
 - **Hooks are opt-in and partial.** The pack's hooks block a tier-2 push or PR without a passing spec and a recorded panel, the agent's tier-2 merge, a merge with an open blocking decision, AI authorship trailers and secrets, but only after you enable them in `/agents`, and the agent cannot see whether they are on, so it holds the same lines by discipline either way. They check command text before it runs: a command they do not recognise, or a push made outside marcsh, passes. When a shell reads its commands from a program they cannot see through (`curl ... | sh`), any line of the command that holds `git ... push|commit|merge` or `gh ... pr` is treated as that command, which is the conservative choice. In a command over 256 KB, only the lines that could hold a gated call are read. Without `git` on `PATH`, they only leave a note. rsc's sealed reviews, its leave-branch guard and its post-merge cleanup have no hook here. A user who needs hard gates should also keep branch protection and required reviews on the forge.
 - **Subagents need marcsh 0.4.0 or later to be named.** On 0.3.x the agent passes the subagent file's body as the prompt of a plain `Task`, which keeps the brief but not the subagent's read-only setting. Where no subagent can be started at all, the review is a separate pass by the same agent, which is weaker; at tier 2 the user decides, with a question, if that is enough.
 - **Background work is pi's.** `bg_start`, background `Task` and `task_wait` exist only in interactive pi sessions; on Claude the engine's own background mode is used, and in Plan or `marcsh run` long commands get an explicit `timeout` instead. On pi a foreground command or subagent is stopped after 3 minutes; at most 4 background subagents run at once.
+- **Leftover processes need marcsh with leftover tracking.** `proc_list` and `proc_stop`, `/ps`'s "Leftover processes" and the `N leftover` status count, and the `MARCSH_SESSION` marker the script looks for, need the next marcsh release. Without them the script says the marker is not set, and the agent records the check as not run. On macOS the system hides the environment of Apple's own binaries (`sh`, `sleep`) from `ps -E`, so the script does not see those; third-party programs such as `node` it does. Nothing is stopped automatically.
 - **Questions need someone to answer.** In `marcsh run` (headless) questions are refused; the agents then park the decision or record an assumption, as in autopilot, and never read a refused question as a yes.
 - **Commands need marcsh 0.4.0 or later to pick their agent.** Before that a pack command runs as the selected agent, and its skills load only if that agent is FTD or ASDD.
 - **No stack skills.** The rsc FastAPI, Next.js, Go, Postgres, Flutter, design and security-audit skills are not in the pack. Verification uses the project's own commands.
