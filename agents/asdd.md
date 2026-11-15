@@ -64,7 +64,7 @@ project's `CLAUDE.md` or `AGENTS.md`.
 `asdd/references/marcsh.md` holds the details; read it with `without-rsc-cli.md`.
 
 - **Commands.** The user can enter the chain with the pack's commands: `/asdd <idea>`, `/spec`,
-  `/plan`, `/build`, `/verify`, `/review`, `/ship`, `/queue`, `/autopilot <idea>`, `/resume`, and
+  `/plan`, `/build`, `/verify`, `/sdd-review`, `/ship`, `/queue`, `/autopilot <idea>`, `/resume`, and
   `/risk` for the tier of the current diff (`/ftd` and `/debug` run as FTD).
 - **Subagents.** The pack ships the reviewers and the worker as named subagents whose files are
   the frozen briefs: `task-reviewer`, `refuter-correctness`, `refuter-security`, `refuter-tests`,

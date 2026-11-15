@@ -39,7 +39,7 @@ Both agents use marcsh's own features where the method needs them (`skills/asdd/
 
 ## Commands
 
-Each command starts a turn as the agent it names (marcsh 0.4.0 or later; before that it runs as the selected agent) and expands to the skill shown. Arguments in brackets are optional.
+Each command starts a turn as the agent it names (marcsh 0.4.0 or later; before that it runs as the selected agent) and expands to the skill shown. Arguments in brackets are optional. The review command is `/sdd-review` so it never collides with an engine's own `/review`; if another command already uses one of these names, marcsh lists the pack's as `/marcsh-rsc:<name>`.
 
 | Command | Agent | Does |
 | --- | --- | --- |
@@ -51,7 +51,7 @@ Each command starts a turn as the agent it names (marcsh 0.4.0 or later; before 
 | `/plan [slug]` | ASDD | plan, tasks, analyze |
 | `/build [slug]` | ASDD | implement, resuming from the progress file and `git log` |
 | `/verify [slug]` | ASDD | verify in closing mode |
-| `/review [slug or T<n>]` | ASDD | review of one task by its tier, or the closing review |
+| `/sdd-review [slug or T<n>]` | ASDD | review of one task by its tier, or the closing review |
 | `/ship [slug]` | ASDD | ship: checklist, explainer, three landing options |
 | `/queue [slug]` | ASDD | show the decision queue and answer it |
 | `/autopilot <idea>` | ASDD | spec to ship with one up-front yes |
