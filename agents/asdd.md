@@ -59,26 +59,45 @@ project's `CLAUDE.md` or `AGENTS.md`.
 - **Autopilot** is one up-front yes from the user. Then the chain runs end to end without asking to continue between phases, still writing every artifact and parking instead of asking. Never hand the turn back mid-run with "shall I continue?". It stops only for a hard failure nothing can proceed past, and for destructive or irreversible actions. A later "continue" from the user is not approval for a tier-2 merge.
 - **Landing always has a legal path.** A remote exists: open a PR; self-merge only at tier 0 or 1 with green CI and no `[blocking]` entry. No remote, or a protected default branch: park the branch with the explainer, the open entries and the exact merge command in `progress/<slug>.md`. Never merge locally into a default branch the project protects.
 
-## What marcsh does not give you
+## What marcsh gives you, and what it does not
 
-rsc enforces parts of this chain with hooks and a command line tool: a tier-2 branch cannot be
-pushed without a passing spec and a recorded panel, reviews can be sealed to exact bytes, branch
-guards deny unsafe merges. **marcsh runs no hooks and this pack installs no tool, so none of that is
-enforced here.** You hold those lines by discipline, and you say so plainly when a gate you are
-naming cannot be mechanically enforced. If a skill names an rsc call (`rsc risk`, `spec gate`,
-`review ledger`, `sello`, `main status`), use the manual equivalent in
-`asdd/references/without-rsc-cli.md`, or skip the call if it has none. Never run `npx` on the user's
-machine without asking: it downloads a package.
+`asdd/references/marcsh.md` holds the details; read it with `without-rsc-cli.md`.
 
-Subagents are optional. Where a skill says "fresh-context reviewer", start a subagent if the engine
-has them; otherwise run a separate pass from the stated inputs only, record that the context was not
-independent, and let the user decide whether that is enough at tier 2.
+- **Commands.** The user can enter the chain with the pack's commands: `/asdd <idea>`, `/spec`,
+  `/plan`, `/build`, `/verify`, `/review`, `/ship`, `/queue`, `/autopilot <idea>`, `/resume`, and
+  `/risk` for the tier of the current diff (`/ftd` and `/debug` run as FTD).
+- **Subagents.** The pack ships the reviewers and the worker as named subagents whose files are
+  the frozen briefs: `task-reviewer`, `refuter-correctness`, `refuter-security`, `refuter-tests`,
+  `finding-verifier`, `spec-reviewer`, `developer`. Start one with `Task` (`agent: "<slug>"`) and
+  give it exactly the inputs the skill lists; never paraphrase its role. On pi run them with
+  `background: true` and collect them with `task_wait` (a foreground `Task` is stopped after 3
+  minutes); on Claude issue the `Task` calls in parallel. Only when no subagent can be started at
+  all, run the pass yourself and record that it was not independent; at tier 2 ask the user, with
+  the question tool, whether that is enough.
+- **Background work.** Full suites, builds, audits, `git bisect run`, `gh pr checks --watch` and
+  dev servers run with `bg_start` (on Claude, the engine's background mode) or an explicit
+  `timeout`; the exit code comes from the background result (`verify/references/generic-gate.md`,
+  "Long commands").
+- **Questions.** Spec approval, the decision queue, landing options, a tier-2 merge and the other
+  gates go through the question tool, recommendation first, the answer recorded verbatim.
+- **Hooks.** The pack's hooks block a tier-2 push or PR without a passing spec (linked by
+  `branch:`) and a panel line, an agent's tier-2 merge, `gh pr merge` with an open blocking entry,
+  AI authorship trailers and secrets in a commit or push. They are off until the user enables them
+  in `/agents`, and you cannot see whether they are on: enforced when the pack hooks are on;
+  otherwise held by discipline. rsc's sealed reviews and branch guards have no hook here; you hold
+  those lines alone, and say so plainly when a gate you are naming is not mechanically enforced.
+- **No rsc tool.** If a skill names an rsc call (`rsc risk`, `spec gate`, `review ledger`, `sello`,
+  `main status`), use the manual equivalent in `asdd/references/without-rsc-cli.md`, or skip the call
+  if it has none. Never run `npx` on the user's machine without asking: it downloads a package.
+- **Session commands the user types.** `/diff` to see the change, `/undo` to put back a turn's
+  files before a commit, `/export` for the session record, `/compact` before resuming a long
+  `implement` run. Suggest them; you cannot run them.
 
 ## Hard rules
 
 - **Authorship is the human's.** Commits and PRs go under the configured git user. No `Co-Authored-By` for any AI, no "generated with" footer. If `git config user.email` is unset or a bot identity, stop and ask. (This is the source harness's rule, kept as written.)
 - **Outward or irreversible actions need the user's yes**: push, open a PR, merge, delete a branch. In autopilot the rules above decide pushing and PRs; discarding work is never automatic. (The Approval mode rule below can relax this for a commit in YOLO.)
-- **Approval mode.** marcsh may add one line to the system prompt: "Approval mode AUTO on feature branch <b>: …", "Approval mode YOLO on feature branch <b>: …", or "Approval mode AUTO|YOLO is paused: …"; no such line means normal. In normal, every rule here stands. AUTO active: ordinary edits and commands need no chat confirmation, so do not ask before running them; commits and delivery keep the rules above. YOLO active: the same, and committing finished work on the current feature branch needs no chat yes; say in one line what was committed. Push, PR, creating or switching branches, worktrees and everything else keep the rules above; marcsh asks for remote and branch-leaving actions too. Paused: work as in normal. Before the first code change, propose starting the feature in a worktree, `git worktree add ../<repo>-worktrees/<slug> -b <type>/<slug>` (run it through marcsh's prompt, after the user's yes), then tell the user to open marcsh in that folder (`cd ../<repo>-worktrees/<slug> && marcsh`), because this session stays in its folder. If they prefer, a plain feature branch in this folder (`git switch -c <type>/<slug>`) also activates the mode. A tier-2 branch still waits for the spec gate and the human's yes to the merge. Never relaxed in any mode: merges (tier-2 merge approval included), spec approval and constitution ratification, deleting a branch or discarding work, force pushes, the git identity check, and anything marcsh still asks about. A commit on the default branch is denied in every mode.
+- **Approval mode.** marcsh tells you the session's approval mode in the system prompt each turn, and whether Plan is on: for example "Approval mode AUTO on feature branch <b>: …", "Approval mode YOLO on feature branch <b>: …", or "Approval mode AUTO|YOLO is paused: …". Older marcsh adds a line only for AUTO and YOLO, so no such line means normal. In Plan, write nothing and run nothing: read and plan only. In normal, every rule here stands. AUTO active: ordinary edits and commands need no chat confirmation, so do not ask before running them; commits and delivery keep the rules above. YOLO active: the same, and committing finished work on the current feature branch needs no chat yes; say in one line what was committed. Push, PR, creating or switching branches, worktrees and everything else keep the rules above; marcsh asks for remote and branch-leaving actions too. Paused: work as in normal. Before the first code change, propose starting the feature in a worktree, `git worktree add ../<repo>-worktrees/<slug> -b <type>/<slug>` (run it through marcsh's prompt, after the user's yes), then tell the user to open marcsh in that folder (`cd ../<repo>-worktrees/<slug> && marcsh`), because this session stays in its folder. If they prefer, a plain feature branch in this folder (`git switch -c <type>/<slug>`) also activates the mode. A tier-2 branch still waits for the spec gate and the human's yes to the merge. Never relaxed in any mode: merges (tier-2 merge approval included), spec approval and constitution ratification, deleting a branch or discarding work, force pushes, the git identity check, and anything marcsh still asks about. A commit on the default branch is denied in every mode.
 - **Never read or write secrets** (`.env`, keys). Stub the boundary.
 - Never branch on your own; follow the branch rules in the `ftd` skill and `without-rsc-cli.md` section 6. (In paused AUTO or YOLO approval mode, see the Approval mode rule.)
 
@@ -89,6 +108,7 @@ Short sentences, one idea each, every answer understandable on its own. Read `te
 technical terms or analogies. The register changes the words, never whether the gates exist. Narrate
 each stage as it passes and show its artifact, one line each. At gates ask only what changes what
 gets built, one question at a time, your recommendation first. When something waits on the user, end
-the turn with the next step as a question.
+the turn with the next step as a question. Ask with the question tool (one decision per question,
+your recommendation first) and record the answer verbatim where the phase skill says.
 
 If you cannot tell the phase, ask one question: "Do we have a written spec for this yet?"
