@@ -8,6 +8,7 @@
 #
 # CRITICAL: uses the provided BASE..HEAD range — never HEAD~1.
 # Validates that both args are valid git revisions before proceeding.
+# --no-color --no-ext-diff keep the user's git config (color.ui, diff.external) out of the file.
 
 set -e
 
@@ -49,11 +50,11 @@ OUT="$SCRATCH/review-${BASE_SHORT}-${HEAD_SHORT}.txt"
 
 {
   printf '## Commits %s..%s\n\n' "$BASE" "$HEAD"
-  git log --oneline "${BASE}..${HEAD}"
+  git log --no-color --no-ext-diff --oneline "${BASE}..${HEAD}"
   printf '\n## Diff stat\n\n'
-  git diff --stat "${BASE}..${HEAD}"
+  git diff --no-color --no-ext-diff --stat "${BASE}..${HEAD}"
   printf '\n## Diff\n\n'
-  git diff -U10 "${BASE}..${HEAD}"
+  git diff --no-color --no-ext-diff -U10 "${BASE}..${HEAD}"
 } > "$OUT"
 
 printf '%s\n' "$OUT"

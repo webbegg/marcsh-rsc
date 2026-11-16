@@ -1,0 +1,23 @@
+#!/bin/sh
+# sdd-root [DIR] — print the SDD workspace root: the first directory, from the git root of DIR
+# (default: the current directory; DIR itself when it is not in a git repository) upward, that
+# contains `02-DOCS`. Exit 1, printing nothing, when there is none.
+#
+# Side-effect free: it creates nothing (unlike skills/implement/scripts/sdd-workspace).
+# This file lives under hooks/ because marcsh's plugin view, where hooks run, holds only
+# skills/, commands/ and hooks/; scripts/sdd-root is a wrapper for use from a checkout.
+
+case $0 in
+  */*) LIB=${0%/*} ;;
+  *) LIB=. ;;
+esac
+. "$LIB/git.sh"
+
+_start=${1:-.}
+if rsc_repo "$_start"; then
+  _top=$RSC_TOP
+else
+  _top=$(CDPATH='' cd -- "$_start" 2> /dev/null && pwd -P) || exit 1
+fi
+rsc_sdd_root "$_top" || exit 1
+printf '%s\n' "$RSC_ROOT"

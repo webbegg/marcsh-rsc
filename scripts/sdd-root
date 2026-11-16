@@ -1,0 +1,8 @@
+#!/bin/sh
+# sdd-root [DIR] — print the first directory, from the git root upward, that contains 02-DOCS;
+# exit 1 when there is none. Side-effect free.
+#
+# The implementation is hooks/lib/sdd-root: marcsh's plugin view (where hooks run) holds only
+# skills/, commands/ and hooks/, so the hooks cannot reach this folder. This wrapper is for use
+# from a checkout of the pack.
+exec sh "$(dirname -- "$0")/../hooks/lib/sdd-root" "$@"

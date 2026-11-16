@@ -6,7 +6,8 @@
 #   $1  optional explicit dir override; if provided, use that dir instead of auto-detecting.
 #
 # Auto-detection: if a 02-DOCS dir exists at repo root, use 02-DOCS/wiki/sdd/.scratch/
-# Otherwise fall back to ${TMPDIR:-/tmp}/rsc-sdd-<pid>.
+# Otherwise fall back to ${TMPDIR:-/tmp}/rsc-sdd-scratch-<cksum of the project path>: one stable
+# dir per project (the git root, or the cwd outside a repository), so projects never share briefs.
 
 set -e
 
@@ -32,8 +33,10 @@ else
   if [ -n "$_ROOT" ] && [ -d "$_ROOT/02-DOCS" ]; then
     SCRATCH="$_ROOT/02-DOCS/wiki/sdd/.scratch"
   else
-    # Use a fixed stable name under TMPDIR so repeated calls return the same path.
-    SCRATCH="${TMPDIR:-/tmp}/rsc-sdd-scratch"
+    # A stable name per project under TMPDIR, so repeated calls return the same path.
+    _PROJECT="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+    _HASH="$(printf '%s' "$_PROJECT" | cksum | cut -d ' ' -f 1)"
+    SCRATCH="${TMPDIR:-/tmp}/rsc-sdd-scratch-${_HASH}"
   fi
 fi
 
