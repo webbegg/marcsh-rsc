@@ -19,6 +19,8 @@ language (the lane names are labels to translate).
 recommend. Read-only: write nothing, create no artifact, delegate no writer. Asking you to *think
 about* building something is still this lane; only asking to build authorises it. When change
 intent is ambiguous, ask one question and stay here — ambiguity slows the lane, never raises it.
+Ask it with the question tool (`../asdd/references/marcsh.md` §3): "Just the answer" and "Make
+the change". It asks whether to change anything, never which lane.
 
 **You choose the lane; never hand that choice to the person.** Simple → **FTD**: one feature document
 in `02-DOCS` (intent, scope, checklist, evidence, next step), tasks checked off against observed proof.
@@ -28,7 +30,7 @@ clarify, then picks manual or autopilot. Say which and why in one line; switch i
 
 **Where.** Default branch looks open (nothing complex, one person, no CI) → work on it, no branch
 question. Looks closed (CI, a deployment, a team, or the user said branches and PRs) → before each
-code change ask: this branch, a new one, or the default branch? Never branch alone. Another session
+code change ask, with the question tool: this branch, a new one, or the default branch? Never branch alone. Another session
 in this folder → a separate worktree. Details: `../asdd/references/without-rsc-cli.md` §6.
 
 Judge the **meaning**, not the wording: the trigger is semantic in any language. A bug fix restoring
