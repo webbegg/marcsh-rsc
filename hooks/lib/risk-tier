@@ -1,0 +1,63 @@
+#!/bin/sh
+# risk-tier [--base <ref>] [--head <ref>] [--committed]
+#
+# The risk tier (0/1/2) of the current branch's change, computed exactly as
+# skills/asdd/references/without-rsc-cli.md §1 says: every touched path is scored by the path
+# table (highest row wins; a path matching nothing is tier 1), then the added lines are read for
+# the content signals (one hit makes it tier 2). The tier is the highest of all.
+#
+#   --base <ref>   compare against <ref> (default: the default branch: origin/HEAD, else main,
+#                  else master; the remote-tracking ref when it exists)
+#   --head <ref>   the tip of the change (default: HEAD)
+#   --committed    only the committed diff <base>...<head>; without it uncommitted and untracked
+#                  work counts too, as §1 says (the hooks use --committed: what leaves the machine)
+#
+# Output, one per line:
+#   tier=<0|1|2|none>                          none = nothing to classify (never defaulted to 0)
+#   base=<ref>
+#   reason=path <class>: <path>                each path at the highest tier
+#   reason=content <class> (<signal>): <path>  each content hit (a secret's value is never shown)
+# Exit 0, or 1 with a message on stderr. Read-only; no network, no npx.
+#
+# Not machine-checkable: the project's own always-human paths (REVIEW.md, the constitution).
+# Add those by hand. This file lives under hooks/ because marcsh's plugin view, where hooks run,
+# holds only skills/, commands/ and hooks/; scripts/risk-tier is a wrapper for a checkout.
+
+LC_ALL=C
+export LC_ALL
+
+case $0 in
+  */*) LIB=${0%/*} ;;
+  *) LIB=. ;;
+esac
+case $LIB in /*) ;; *) LIB=$PWD/$LIB ;; esac
+. "$LIB/git.sh"
+. "$LIB/risk-tier.sh"
+
+_base=''
+_head=HEAD
+_committed=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --base) [ $# -ge 2 ] || { echo "risk-tier: --base needs a ref" >&2; exit 1; }; _base=$2; shift 2 ;;
+    --base=*) _base=${1#--base=}; shift ;;
+    --head) [ $# -ge 2 ] || { echo "risk-tier: --head needs a ref" >&2; exit 1; }; _head=$2; shift 2 ;;
+    --head=*) _head=${1#--head=}; shift ;;
+    --committed) _committed=1; shift ;;
+    -h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "risk-tier: unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+
+if ! rsc_repo .; then
+  echo "risk-tier: not a git repository" >&2
+  exit 1
+fi
+if [ -z "$_base" ]; then
+  if ! rsc_default_branch .; then
+    echo "risk-tier: cannot find the default branch (no origin/HEAD, main or master); pass --base <ref> or run: git remote set-head origin -a" >&2
+    exit 1
+  fi
+  _base=$RSC_DEFAULT_REF
+fi
+rsc_risk_tier "$RSC_TOP" "$_base" "$_head" "$_committed"

@@ -60,8 +60,9 @@ Round 1 (frontier: 3 independent gaps)
 → user answers → fold in → recompute the frontier → Round 2
 ```
 
-Where the harness offers a native question selector, emit the round through it;
-otherwise emit the numbered text above. Same content either way.
+Emit the round through marcsh's question tool (up to four questions per call, recommendation
+first; `../../asdd/references/marcsh.md` §3); where no question tool answers, emit the numbered
+text above. Same content either way.
 
 **Facts are yours, decisions are theirs.** A gap that needs a fact from the
 environment (a file, a config, a version) is legwork, not a question: go find

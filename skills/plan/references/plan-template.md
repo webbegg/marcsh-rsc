@@ -116,7 +116,7 @@ unit / contract / integration / e2e. Tooling is the stack skill's job — name t
 1. <step> — depends on: none — [serial | parallelizable]
 2. <step> — depends on: #1 — …
 
-- Parallel candidates (disjoint scope, no shared state): #…, #… (fan-out as parallel subagents, if the engine has them)
+- Parallel candidates (disjoint scope, no shared state): #…, #… (fan-out as parallel `developer` subagents)
 - Hard ordering constraints and why.
 
 ## 7. Risks & open decisions

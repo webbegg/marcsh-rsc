@@ -28,7 +28,7 @@ Read all four before analyzing. The rsc-sdd artifacts live under `02-DOCS/wiki/s
 | Plan | `02-DOCS/wiki/sdd/plans/<slug>.md` | HOW. Must cover every spec requirement, add nothing the spec didn't ask for. |
 | Tasks | task list inside the plan artifact | The ordered, verifiable steps. Must implement the plan, no more. |
 
-If any artifact is missing, **stop and say so** — analyze cannot gate what isn't there. Name the missing one and the phase that produces it. If a `<slug>` is ambiguous (several specs), ask which feature is being gated; do not analyze all of them blindly.
+If any artifact is missing, **stop and say so** — analyze cannot gate what isn't there. Name the missing one and the phase that produces it. If a `<slug>` is ambiguous (several specs), ask which feature is being gated (the question tool, one option per candidate spec); do not analyze all of them blindly.
 
 ## The six analyses
 

@@ -13,7 +13,7 @@ origin: risco
 
 This skill does **not** do a phase. It names the method, reads the register, places the request on the map and hands off. Each phase skill points at the next one.
 
-**Running under marcsh.** This pack is adapted from the rsc harness, which wraps these skills in a command line tool and hooks. marcsh runs neither. Every check the text names (`rsc risk`, `spec gate`, `review ledger`, `sello`, branch guards) has a manual equivalent in `references/without-rsc-cli.md`; read it once before the first phase and use it wherever a skill names an rsc call. What rsc enforced with a hook, you hold by discipline, and you say so when a gate cannot be enforced here.
+**Running under marcsh.** This pack is adapted from the rsc harness, which wraps these skills in a command line tool and hooks. This pack installs no tool; every check the text names (`rsc risk`, `spec gate`, `review ledger`, `sello`, branch guards) has a manual equivalent in `references/without-rsc-cli.md`; read it once before the first phase and use it wherever a skill names an rsc call. The pack ships its own hooks for the tier-2 push, PR and merge gates, the blocking queue, authorship and secrets: enforced when the pack hooks are on; otherwise held by discipline. `references/marcsh.md` says how the chain uses marcsh: long commands in the background, the named reviewer and worker subagents, the question tool, the hooks, the approval mode, and `/diff`, `/undo`, `/export`, `/compact`.
 
 ## The five stages
 
@@ -51,7 +51,7 @@ Every spec answers four questions, and the spec gate (`references/without-rsc-cl
 
 ### The risk decides, never the agent
 
-The risk tier classifies a change by **what it touches and what it adds** (a path table plus fixed content patterns — password hashing, session cookies, payments, schema changes, secrets — so auth code in `src/app.js` is still auth). The table and the procedure are in `references/without-rsc-cli.md` §1: tier 0 docs/copy → no reviewer; tier 1 ordinary code → one fresh-context reviewer; tier 2 auth, billing, CI workflows, migrations, secrets, agent config → the three-lens panel **and human approval**. An agent's approval never counts as a human's. In rsc a tier-2 branch is stopped at push unless a linked spec passes the gate and a panel is recorded. marcsh runs no hooks, so **you** hold that line: no push, PR or merge at tier 2 until the spec passes the gate, the three lenses ran and are recorded in the progress file, and the user said yes.
+The risk tier classifies a change by **what it touches and what it adds** (a path table plus fixed content patterns — password hashing, session cookies, payments, schema changes, secrets — so auth code in `src/app.js` is still auth). The table and the procedure are in `references/without-rsc-cli.md` §1: tier 0 docs/copy → no reviewer; tier 1 ordinary code → one fresh-context reviewer; tier 2 auth, billing, CI workflows, migrations, secrets, agent config → the three-lens panel **and human approval**. An agent's approval never counts as a human's. A tier-2 branch is stopped at push unless a linked spec passes the gate and a panel is recorded: enforced when the pack hooks are on; otherwise held by discipline. Either way **you** hold that line: no push, PR or merge at tier 2 until the spec passes the gate, the three lenses ran and are recorded in the progress file, and the user said yes.
 
 ### The loop converges
 
@@ -61,12 +61,19 @@ The review ledger holds it to the rules that stopped Anthropic's 50-round review
 
 Tier 2, a contradiction with a recorded decision, a gap that would make the build unsafe, or no convergence in 3 rounds: the task goes to the **decision queue** (`## Decision queue` in `progress/<slug>.md`) with its evidence, and the agent **continues with the independent tasks**. The run never waits at 2 a.m. for an answer.
 
-Every entry carries a kind, one line each, in exactly this form (no bold, no other bullet):
+Every entry carries a kind, one line each, in exactly this form (no bold, no other bullet; the pack's merge hook greps for `- [blocking]`):
 
 ```markdown
 - [blocking] Q3 — <what must be decided>, <evidence>, <task>
 - [review-after] Q4 — <assumption taken>, <where it is recorded>, <task>
+- [closed] Q2 — <what was decided>, <evidence>, <task>
+  Answer (YYYY-MM-DD): "<the human's words, verbatim>"
 ```
+
+**Closing an entry.** Only the human's answer closes a `blocking` entry. Record the answer verbatim
+on an indented line under the entry (no bullet), then change only the entry's tag from
+`[blocking]` to `[closed]`. That tag change is the one edit allowed to an old line of the
+append-only progress file. The merge hook blocks only on `- [blocking]`.
 
 - **`blocking`** — tier 2, a contradiction with a recorded decision, no convergence in 3 rounds, a hard failure. It stops a self-merge.
 - **`review-after`** — clarify's recorded assumptions, a spec reference the agent had to write itself, a provisional constitution ratification. It never stops a merge; it is listed in the PR body (or the parked summary) for the human.
@@ -80,11 +87,11 @@ Every entry carries a kind, one line each, in exactly this form (no bold, no oth
 3. **Ambiguous / architectural / risky before a spec?** → optional proposal via `specify`.
 4. **Fuzzy idea, no spec?** → `specify`. **Spec with gaps?** → `clarify`.
 5. **Approved spec, no plan?** → `plan`, then `tasks`, then `analyze`.
-6. **Green light?** → `implement` (the per-task loop; parallel subagents or a separate worktree when useful and the engine allows).
+6. **Green light?** → `implement` (the per-task loop; `developer` subagents for disjoint `[P]` tasks, or a separate worktree when another session shares the folder).
 7. **All tasks done or parked?** → closing: `verify` (closing mode, main merged in), then `review` (closing review of that exact state), then `ship`.
 8. **Broken mid-flight?** → `debug`, then resume.
 
-Cannot tell the phase? Ask one question: *"Do we have a written spec for this yet?"*
+Cannot tell the phase? Ask one question with the question tool (`references/marcsh.md` §3): *"Do we have a written spec for this yet?"*, options "No, start from the idea", "Yes, it needs clarifying", "Yes, it is approved".
 
 Skip honestly: `constitution` runs once per project; `clarify` and `analyze` are gates, not paperwork — pass through only when the change is genuinely tiny, and say so.
 
@@ -102,7 +109,7 @@ Autopilot does not stop the run for questions — it **parks**: real ambiguity, 
 - `implement` parks `blocking` items and continues with the independent tasks.
 - `ship` lands by the rule below.
 
-**Never hand the turn back mid-run.** No "¿sigo?" / "shall I continue?": not between phases, not while reviewers run. Background reviewers are waited for (their completion notice, or run them in the foreground); ending the turn to wait ends a headless run. A later "continue" from the person resumes the run; it is **not** approval for a tier-2 merge, which needs an explicit yes to that merge.
+**Never hand the turn back mid-run.** No "¿sigo?" / "shall I continue?": not between phases, not while reviewers run. Background reviewers and workers are waited for with `task_wait` (call it again until each result is in), and background commands are collected from their result; ending the turn to wait ends a headless run. A later "continue" from the person resumes the run; it is **not** approval for a tier-2 merge, which needs an explicit yes to that merge.
 
 **Landing — there is always a legal path.** A remote exists → open a PR; self-merge only when the risk tier is 0-1, CI is green and no `blocking` entry is open; `review-after` entries go into the PR body. No remote → **park**: leave the branch committed, write the explainer, the open entries and the exact merge command for the human into `progress/<slug>.md`, and stop. Never merge locally into a default branch the project protects (`references/without-rsc-cli.md` §6): park instead.
 
@@ -110,7 +117,7 @@ Narrate plainly: name each stage as it passes and show its artifact, one line ea
 
 ## Read the register first
 
-Read `technical_level` in `02-DOCS/wiki/harness/user-profile.md` if the file exists. It picks the words (technical, or plain with analogies), never whether the gates exist. No profile → ask once "technical terms or analogies?", and if the answer should last, write it to that file as `technical_level: technical | non-technical`. At gates, ask only what changes what gets built, one question at a time, recommendation first.
+Read `technical_level` in `02-DOCS/wiki/harness/user-profile.md` if the file exists. It picks the words (technical, or plain with analogies), never whether the gates exist. No profile → ask once with the question tool, "technical terms or analogies?", and if the answer should last, write it to that file as `technical_level: technical | non-technical`. At gates, ask only what changes what gets built, one question at a time, recommendation first, with the question tool, and record the answer verbatim where the phase skill says.
 
 ## Where the artifacts live
 
@@ -153,7 +160,7 @@ Every phase ends with this block so the dispatcher can chain without interpretin
 }
 ```
 
-A run stopped mid-flight writes `02-DOCS/wiki/sdd/sessions/<date>-<slug>.md` instead: stage, artifacts, last verdict, done and parked tasks, the decision queue, next steps.
+A run stopped mid-flight writes `02-DOCS/wiki/sdd/sessions/<date>-<slug>.md` instead: stage, artifacts, last verdict, done and parked tasks, the decision queue, next steps. Suggest the user keep the transcript beside it with `/export`, and `/compact` before the run resumes (`references/marcsh.md` §6). `/resume` reads this file and the progress file.
 
 ## Anti-patterns → STOP
 

@@ -50,8 +50,8 @@ status: in-progress
 ```
 
 The frontmatter says whose work it is, so «¿qué ha hecho cada uno?» has an answer. When the branch lands
-on the default branch, set `status: done` and replace Next with where and when it merged. marcsh runs
-no hooks, so nothing does this for you: do it in the landing turn.
+on the default branch, set `status: done` and replace Next with where and when it merged. No hook
+does this for you: do it in the landing turn.
 
 No decision journal, no phase records, no approvals. If a decision was meaningful, one line of
 rationale goes next to the task it belongs to.
@@ -65,35 +65,43 @@ the chain: a result asserted without evidence is treated as not done.
 
 The lane inherits ASDD's per-task loop, cut to its floor:
 
-1. **Self-check** — run the change's own check and record the output under Evidence.
+1. **Self-check** — run the change's own check and record the output under Evidence. Only focused
+   tests run in the foreground; everything else by the long-command rule
+   (`../verify/references/generic-gate.md`, "Long commands"). Tell the user they can see the whole
+   change with `/diff`, and that `/undo` puts back the files of a turn that went wrong before it
+   was committed (`../asdd/references/marcsh.md` §6). Stop what the check started, list the
+   leftovers, never stop one without the user's yes, and record "no leftover processes" or what
+   still runs and why under Evidence (`../asdd/references/marcsh.md` §7).
 2. **Risk tier** — the tier of what changed, from the path table and content signals in
    `../asdd/references/without-rsc-cli.md` §1. State it in one line with the reason.
-3. **Tier ≥ 1 → one fresh-context reviewer** (`../review/SKILL.md`, per-task mode). Tier 0 → none.
+3. **Tier ≥ 1 → one fresh-context reviewer**: the `task-reviewer` subagent, with the feature
+   document in place of the spec (`../implement/references/per-task-review.md`, which holds the
+   inputs and the dispatch). Tier 0 → none.
 4. **Mandatory controls** — tests, build, the security scan the project has. What did not run is
    written «not executed», never left blank.
 
 **Escalate to `asdd`** when the risk tier is **2**, or when the change contradicts a decision
 already recorded in `decisions.md`: the feature document becomes its spec input, as below.
 
-**This escalation is advised here, not enforced.** In rsc a hook stops a tier-2 branch from being pushed or opened as a PR until a spec linked to it (`branch: <name>` in its frontmatter) passes the spec gate. marcsh runs no hooks, so you hold the line: at tier 2, do not push or open a PR until that spec exists and passes the gate (`../asdd/references/without-rsc-cli.md` §2). Time pressure does not change the lane: escalate the moment the tier is 2, before writing more code.
+**The pack's push hook backs this escalation.** It stops a tier-2 branch from being pushed or opened as a PR until a spec linked to it (`branch: <name>` in its frontmatter) passes the spec gate and the panel is recorded: enforced when the pack hooks are on; otherwise held by discipline. Either way you hold the line: at tier 2, do not push or open a PR until that spec exists and passes the gate (`../asdd/references/without-rsc-cli.md` §2). Time pressure does not change the lane: escalate the moment the tier is 2, before writing more code.
 
 ## Isolation
 
-rsc records per project whether the default branch is open or closed to the agent. marcsh has no
-such switch, so you judge it and ask — never a branch opened on your own (details in
+marcsh blocks every commit on the default branch, in every approval mode, so code work never runs
+there. You ask where it runs — never a branch opened on your own (details in
 `../asdd/references/without-rsc-cli.md` §6):
 
-- **Default branch looks open** (research, content, scripts, simple projects, no CI, one person) →
-  work straight on it. Do not ask about branches.
-- **Default branch looks closed** (long-lived code, CI, a deployment or several people, or the user
-  said branches and PRs) → before EACH change that writes code, ask in one line: "Do it on this
-  branch (`<current>`), on a new one, or on `<default branch>` directly?" Already on another branch
-  is no exception: an unrelated change does not go into it without asking. A new branch is named by
-  intent and closes with a pull request.
-- **Docs, wiki or config only** → no question, no branch.
+- **On the default branch** → before the first change that writes code, ask with the question tool
+  (`../asdd/references/marcsh.md` §3): a new branch `<type>/<slug>` (recommended), or a worktree
+  (recommended instead when the folder holds changes you did not make or the approval mode is
+  paused). Record the answer in the feature document. A new branch is named by intent and closes
+  with a pull request.
+- **On another branch** → an unrelated change does not go into it without asking: this branch
+  (`<current>`) or a new one.
+- **Notes under `02-DOCS` that you will not commit** → no question, no branch.
 - **Another session working in this same folder** → a separate worktree (`git worktree add
-  ../<repo>-<branch> -b <branch>`), never a branch switch under the other session. Only when you can
-  see signs of one; alone, setting one up costs more than it protects.
+  ../<repo>-worktrees/<slug> -b <type>/<slug>`), never a branch switch under the other session.
+  Only when you can see signs of one.
 
 Once the branch lands, remove its worktree and branch only if you created them and they are merged.
 

@@ -163,7 +163,7 @@ delete a user's map entry.
 | T003 |  | Write failing test for `POST /login` | `pytest tests/auth/test_login.py` fails: no route | T001 | AC3 | 1 |
 | T004 |  | Implement `POST /login` | T003 test green; bad pw → 401 | T003 | AC3 | 2 |
 | ... | ... | ... | ... | ... | ... | ... |
-| T0NN |  | All done-checks pass + full verify green | every row above checked; the project's verify command (`scripts/verify.sh`, or the generic gate) exits 0 | all | all ACs | — |
+| T0NN |  | All done-checks pass + full verify green | every row above checked; the project's verify command (`scripts/verify.sh`, or the generic gate) exits 0, run in the background by the long-command rule | all | all ACs | — |
 ```
 
 ### Per-task Interfaces (for context-isolated implementers)
@@ -250,7 +250,8 @@ The task list is now the contract for the rest of the build. Hand off to
 **`analyze`** — the consistency gate that cross-checks constitution ↔ spec ↔ plan
 ↔ **tasks** and flags uncovered criteria and untraced tasks — and then to
 **`implement`** (stage 4), which runs each task through its build–review–fix loop,
-running `[P]` tasks as parallel subagents only where the engine can, and isolating on a branch.
+running `[P]` tasks as parallel `developer` subagents (the same-agent sequence only when no
+subagent can start), and isolating on a branch.
 
 Do not jump straight to `implement`. The whole point of writing a checkable list
 was to let `analyze` audit it cheaply *before* code exists.

@@ -1,6 +1,6 @@
 ---
 name: implement
-description: "Use when an approved plan and task list exist and it is time to turn them into working, reviewed code — ASDD stage 4, the per-task loop after `analyze`: TDD build and self-check, the risk tier of the diff, review scaled by tier (0/1/3 reviewers), mandatory controls (tests, build, security, traceability), at most 3 fix rounds, then fix-and-record or park in the decision queue. Progress ledger survives compaction; disjoint tasks fan out via `parallel`. NOT spec writing (that is `specify`), NOT planning (that is `plan`), NOT the closing whole-branch gate (stage 5: `verify` + `review`)."
+description: "Use when an approved plan and task list exist and it is time to turn them into working, reviewed code — ASDD stage 4, the per-task loop after `analyze`: TDD build and self-check, the risk tier of the diff, review scaled by tier (0/1/3 reviewers), mandatory controls (tests, build, security, traceability), at most 3 fix rounds, then fix-and-record or park in the decision queue. Progress ledger survives compaction; disjoint `[P]` tasks fan out to `developer` subagents. NOT spec writing (that is `specify`), NOT planning (that is `plan`), NOT the closing whole-branch gate (stage 5: `verify` + `review`)."
 tags: [asdd, sdd, implement, code]
 origin: risco
 ---
@@ -38,16 +38,21 @@ back — you do not write feature code anyway.
    `testing.strict_tdd`, `testing.commands.apply`, `testing.commands.verify` and
    `sdd.review_budget`, and do not choose a different test command from memory. Without it (the
    normal case in this pack), take the commands from the project's manifests and say where you
-   found them; strict TDD is on and the review budget is 400 changed lines.
+   found them; strict TDD is on and the review budget is 400 changed lines. Only focused RED/GREEN
+   runs go in the foreground; every other command follows the long-command rule
+   (`../verify/references/generic-gate.md`, "Long commands").
 3. **Choose the skills.** There is no skill registry here. If a stack skill is loaded, digest it
    into compact rules; otherwise follow the project's own conventions and record that fallback.
 4. **Read the register.** Open `02-DOCS/wiki/harness/user-profile.md` if it exists and read
    `technical_level`. It picks technical terms or plain words with analogies at each checkpoint
    (see "Checkpoints" below). No profile → use analogies, and ask before any irreversible step.
-5. **Confirm isolation.** Default branch looks open for this project → work on it. Looks closed
-   (CI, a team, a deployment, or the user said branches and PRs) → stop before the first commit
-   and ask: this branch, a new one, or the default branch? Never branch on your own; another
-   session in this folder makes a separate worktree mandatory
+5. **Confirm isolation.** Every task ends in a commit, and marcsh blocks every commit on the
+   default branch. On the default branch → stop before the first change and ask with the question
+   tool (`../asdd/references/marcsh.md` §3) where the work runs: a new branch `<type>/<slug>`
+   (recommended) or a worktree (recommended instead when the folder holds changes you did not
+   make or the approval mode is paused). On another branch that is not this feature's → ask: this
+   branch or a new one. Record the answer verbatim in the progress file. Never branch on your own;
+   another session in this folder makes a separate worktree mandatory
    (`../asdd/references/without-rsc-cli.md` §6).
 6. **Scan the tasks for independence.** Mark which tasks share files/state and which are disjoint.
    Disjoint clusters are candidates for parallel subagents (below); everything else runs in order.
@@ -104,7 +109,8 @@ Write down the tier, the touched classes, the reviewers it needs (0, 1 or 3) and
 approval is required. Tier 2 = auth, billing, CI workflows, migrations, secrets, agent config.
 The computed tier wins over the task's risk forecast. **The agent never picks or argues down its
 own tier.** (Where the user has Node and says yes, `npx @ericrisco/rsc risk --base <sha> --json`
-does the same; it downloads a third-party package, so ask first.)
+does the same; it downloads a third-party package, so ask first, with the question tool, the manual
+form as the recommended option.)
 
 ### c) Review scaled by tier — fresh context
 
@@ -115,12 +121,13 @@ task, this first one included. Round 1 is the task's first review, not its first
 | Tier | Review |
 | --- | --- |
 | 0 | none — the controls (e) still run |
-| 1 | one fresh-context reviewer; frozen brief in `references/per-task-review.md` |
-| 2 | the three lenses (correctness · security · tests) as `../review/SKILL.md` runs them, in parallel where the engine can; then record the panel line in the progress file (`<task>: panel correctness, security, tests`). In rsc a push gate checks it; here you hold the line. Wait for every reviewer inside the turn; never end the turn to ask whether to continue |
+| 1 | one fresh-context reviewer, the `task-reviewer` subagent; inputs and dispatch in `references/per-task-review.md` |
+| 2 | the three lenses (`refuter-correctness` · `refuter-security` · `refuter-tests`) as `../review/SKILL.md` runs them, all three at once; then record the panel line in the progress file (`<task>: panel correctness, security, tests`). The pack's push hook checks it: enforced when the pack hooks are on; otherwise held by discipline. Wait for every reviewer inside the turn (`task_wait` on pi); never end the turn to ask whether to continue |
 
-"Fresh context" means a subagent that never saw the implementation conversation. If your engine
-cannot start one, say so in the progress entry and run the review as a separate pass from the
-inputs below only; it is a weaker check, and at tier 2 the user decides whether it is enough.
+"Fresh context" means a subagent that never saw the implementation conversation. Start each one
+by the dispatch rule in `../asdd/references/marcsh.md` §2 (on pi with `background: true`); at
+tier 2 a pass of your own instead is a weaker check the user accepts or not
+(`../review/SKILL.md`, "Depth by risk").
 
 Every reviewer gets the **spec**, the **diff as a file** (`scripts/review-package <BASE> <HEAD>`, BASE
 = the task's *recorded* base sha, never `HEAD~1`), the **surrounding code** at that sha (not just the
@@ -143,9 +150,12 @@ lasts beyond the progress file is the review-evals cases and rules `review` writ
 
 These are `verify`'s per-task mode (`../verify/SKILL.md`):
 
+Run them by the long-command rule (`../verify/references/generic-gate.md`, "Long commands").
+
 - **Tests** — the affected suite, not just the new test (`testing.commands.apply`).
 - **Build** — the project compiles and type-checks.
 - **Security** — the stack's audit; a focused security pass of the diff when input, authz or secrets are touched.
+- **Processes** — stop what the task started and list the leftovers before the task closes; never stop one without the user's yes (`../asdd/references/marcsh.md` §7). The progress file records "no leftover processes" or what still runs and why.
 - **Traceability** — every new behaviour in the diff traces to a spec acceptance criterion.
   **Untraced behaviour is a finding.** This is the control that catches the unrequested feature: a
   QR nobody asked for passes every test.
@@ -174,8 +184,12 @@ entry per item: its kind, task id, tier, the question, the options, your recomme
 evidence path. **Kind is `blocking` or `review-after`.** Tier 2, a contradiction with a recorded
 decision and no convergence are `blocking`: the task is parked, its dependents wait, and the branch
 cannot merge itself. An assumption you took so work could continue is `review-after`: nothing waits
-and it does not stop a self-merge — the human reads it afterwards. Only a human closes an entry —
-an agent's approval never counts as human.
+and it does not stop a self-merge — the human reads it afterwards. Only a human's answer closes an
+entry — an agent's approval never counts as human. When the user is there to answer, put each open
+entry to them with the question tool (its options and your recommendation, first;
+`../asdd/references/marcsh.md` §3). Then record the answer verbatim on an indented line under the
+entry and change only its tag from `[blocking]` to `[closed]` (`../asdd/SKILL.md`, "Park, don't
+block").
 
 Then append the progress entry and show the checkpoint (below).
 
@@ -219,7 +233,7 @@ Entry shape:
 - decision: parked in decision queue (tier 2)
 ```
 
-This file is what makes resumes and archive reliable. Never rewrite old entries; append corrections as new entries.
+This file is what makes resumes and archive reliable. Never rewrite old entries; append corrections as new entries. The one allowed edit: closing an answered decision-queue entry by changing its tag from `[blocking]` to `[closed]`.
 
 ### Resume & recovery — trust the ledger, not memory
 
@@ -228,6 +242,8 @@ The progress file is the source of truth across compaction and restarts:
 - **A task recorded `status: complete` here is DONE — never re-dispatch it.** Re-running completed
   tasks (re-implementing, re-committing) is the single most expensive recovery failure: it rebuilds
   work that already exists and can clobber later commits.
+- **Before resuming a long run, suggest `/compact`** to the user (it compacts the conversation; the
+  model cannot run it). Then, as after any compaction:
 - **After a compaction or a fresh session, reconstruct state from this ledger + `git log`, not from
   memory.** Read the progress entries and the commit history first; resume at the first task not
   marked complete. If the ledger and the working tree disagree, believe the tree and append a
@@ -245,13 +261,13 @@ dependency** — and the engine can run subagents, fan them out rather than seri
 
 Each parallel branch still runs its own full red → green → refactor loop and reports back its diff +
 test output. You merge the branches, then run the *combined* test suite before the next checkpoint —
-green-in-isolation is not green-together. Keep the TDD discipline inside each branch.
+green-in-isolation is not green-together (the combined suite runs in the background, by the
+long-command rule). Keep the TDD discipline inside each branch.
 
-**Dispatching is optional and depends on the engine.** rsc ships a `developer` subagent and a
-`parallel` skill for fan-out; this pack ships neither. If your engine can start subagents, you may
-delegate a task or fan out disjoint tasks to them under the contract below. If it cannot, run the
-tasks one after another yourself; the loop is the same, and nothing in it needs a second agent.
-Say which you did in the progress entry.
+**Dispatch to the `developer` subagent** (its worker brief is frozen in it) by the rule in
+`../asdd/references/marcsh.md` §2, with exactly the inputs listed. When it cannot be started, run
+the tasks one after another yourself; the loop is the same, and nothing in it needs a second
+agent. Say which you did in the progress entry.
 
 ### The dispatch contract (carriers, statuses, escalation)
 
@@ -265,11 +281,14 @@ each dispatch self-sufficient and make its return machine-checkable:
   any `### T1` detail block) and `scripts/review-package` — pasted briefs and diffs stay resident in
   your context and get re-read every turn. Both scripts are plain shell and git, and write to
   `02-DOCS/wiki/sdd/.scratch/` (self-ignoring) or, without `02-DOCS`, to a temp folder.
-- **Worktrees left behind.** A subagent dispatched with worktree isolation leaves its worktree
-  when it finishes. After you cherry-pick the worker's commits, remove it
-  (`git worktree remove <path>`).
-- **Set the model if the engine lets you.** An omitted model inherits the session's model, usually
-  the most expensive one; for bulk TDD work a cheaper capable model is the usual choice.
+- **Workers share your working tree and do not commit.** That is why only `[P]` tasks with no
+  shared files run together. When a worker returns, review its task as usual (step c), then commit
+  only that task's files (`git add <files>`, never `-A`) under the human's git identity.
+- **The model.** The `developer` subagent sets no model, so it uses the session's. A worker run
+  in the background cannot start background terminals: its brief tells it to give longer commands
+  an explicit `timeout` or leave them to you, to start no server, and to list its leftovers in
+  its result without stopping any. When every worker has returned, list the leftovers yourself
+  and stop them by the rule (`../asdd/references/marcsh.md` §7).
 - **The worker reports one of four statuses** (it does not guess when unsure):
   - `DONE` — done-check green, `Produces` contract met.
   - `DONE_WITH_CONCERNS` — green, but it flagged a risk/assumption for you to adjudicate.
@@ -286,7 +305,9 @@ each dispatch self-sufficient and make its return machine-checkable:
 In short plain sentences and the `technical_level` register, show: the task, tier, review verdict
 (reported → unique → confirmed), controls (passed / **not run**), rounds, the *why* of any
 non-obvious choice, and the next task. Ask only where the plan forked; confirm before deviating or
-anything irreversible. In autopilot, log it and continue. Brevity never changes the engineering.
+anything irreversible (a fork in the plan is a question-tool question,
+`../asdd/references/marcsh.md` §3). Offer `/diff` when the user wants to see the change so far. In
+autopilot, log it and continue. Brevity never changes the engineering.
 
 ## Logging decisions (the 02-DOCS trail)
 
@@ -336,7 +357,7 @@ outranks the plan, and the plan outranks your in-the-moment preference.
 - **Unresolved `analyze` findings** (contradiction between constitution ↔ spec ↔ plan ↔ tasks) →
   resolve them before any code; they will only get more expensive after the diff exists.
 - **A task forces a constitution violation** → surface it, stop, kick it back to `analyze`/`plan`.
-- **You're on the default branch** → stop before the first commit and ask: branch or default branch (`../asdd/references/without-rsc-cli.md` §6).
+- **You're on the default branch** → stop before the first change and ask with the question tool: a new branch or a worktree; marcsh blocks every commit here (`../asdd/references/without-rsc-cli.md` §6).
 - **A test won't go red** for the right reason (import error, syntax) → stub the module, fix the test.
 - **The combined suite is red after a parallel merge** → do not checkpoint as done; debug with
   `debug` before continuing.

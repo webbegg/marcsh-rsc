@@ -9,8 +9,8 @@ origin: risco
 
 Tests prove the code works, not that it does what was asked. Review answers that other question: **is the diff correct, well-scoped and faithful to the spec — or did it pass for the wrong reasons?** In ASDD (`../asdd/SKILL.md`) it runs in two modes:
 
-- **Per task** — called from `implement`'s loop after each task's self-check. Depth comes from the risk tier, computed by hand from the path table and content signals in `../asdd/references/without-rsc-cli.md` §1: **tier 0** → no review; **tier 1** → one fresh-context reviewer (a subagent that never saw the implementation conversation); **tier 2** → the three-refuter panel below, recorded after it runs as a panel line in the progress file (`<task>: panel correctness, security, tests`; rsc's ship guard refuses to push a tier-2 branch without it, marcsh has no guard so you hold that line — one reviewer is not a panel), and the branch will wait for human approval at ship. The tier reads the diff's content too: auth code in a generic file is tier 2.
-- **Closing review** — once, before `ship`: the whole branch against the spec. Forty individually-correct tasks can still fail to be the feature together: a criterion nobody owned, two tasks that each assumed the other handled an edge, scope that crept in a slice at a time. Read the spec's acceptance criteria and "must respect" list against `git diff <base>...HEAD`, not the task reviews. Its record — tier, counts, verdict, each finding with its outcome — goes to `02-DOCS/wiki/sdd/reviews/<slug>.md`.
+- **Per task** — called from `implement`'s loop after each task's self-check. Depth comes from the risk tier, computed by hand from the path table and content signals in `../asdd/references/without-rsc-cli.md` §1: **tier 0** → no review; **tier 1** → one fresh-context reviewer (the `task-reviewer` subagent, which never saw the implementation conversation); **tier 2** → the three-refuter panel below, recorded after it runs as a panel line in the progress file (`<task>: panel correctness, security, tests`; the pack's push hook refuses to push or open a PR for a tier-2 branch without it — enforced when the pack hooks are on; otherwise held by discipline — and one reviewer is not a panel), and the branch will wait for human approval at ship. The tier reads the diff's content too: auth code in a generic file is tier 2.
+- **Closing review** — once, before `ship`: the whole branch against the spec. Forty individually-correct tasks can still fail to be the feature together: a criterion nobody owned, two tasks that each assumed the other handled an edge, scope that crept in a slice at a time. Read the spec's acceptance criteria and "must respect" list against `git diff <base>...HEAD`, not the task reviews. At tier 1 the reviewer is the `task-reviewer` subagent in closing mode (`mode: closing`), given the spec, the whole branch diff against the default branch as a file (`../implement/scripts/review-package $(git merge-base <default> HEAD) HEAD`) and the verification record; at tier 2, the three lenses with their four inputs on the same diff. Its record — tier, counts, verdict, each finding with its outcome — goes to `02-DOCS/wiki/sdd/reviews/<slug>.md`.
 
 This skill owns **two roles that share one discipline**:
 
@@ -39,7 +39,7 @@ A review's value is its signal-to-noise. Every finding you report costs the auth
 - **Common false positives to skip:** patterns guarded two functions up; "unsafe" calls on values that are provably constant/internal; missing checks the framework already enforces; style the linter owns; defects behind a flag that's off everywhere (note as `nit`, not blocker); test-only or generated code held to prod standards.
 - **No severity inflation.** A `should-fix` dressed as a `blocker` burns the same trust as a missed bug. Rank by actual blast radius and reachability — if everything is a blocker, nothing is.
 
-This skill is the discipline. In rsc a separate review bundle (`/code-review`, `/security-audit`) executes it with a reviewer fleet; that bundle is not in this pack, so the discipline is run by you, and by fresh-context subagents where the engine has them.
+This skill is the discipline. In rsc a separate review bundle (`/code-review`, `/security-audit`) executes it with a reviewer fleet; that bundle is not in this pack. Here the discipline is run by you and by the pack's named subagents (`task-reviewer`, `refuter-correctness`, `refuter-security`, `refuter-tests`, `finding-verifier`), whose files hold the frozen briefs (`../asdd/references/marcsh.md` §2).
 
 ---
 
@@ -107,26 +107,32 @@ End every review you give with one of three, and nothing mushy in between:
 ### The sello — not available here
 
 rsc can seal a review verdict to the exact bytes reviewed (`sello freeze`, `approve`, `block`,
-`budget`) and have a hook refuse commit, push or PR on anything else. That needs rsc's install and
-hooks, so it does not exist under marcsh. Do not run those commands and do not claim a verdict is
-sealed. What is left is the discipline: **name the exact state you reviewed** (commit SHA, or the
+`budget`) and have a hook refuse commit, push or PR on anything else. That needs rsc's install,
+and this pack's hooks do not seal reviews, so it does not exist here. Do not run those commands and
+do not claim a verdict is sealed. What is left is the discipline: **name the exact state you reviewed** (commit SHA, or the
 diff range) in the review record, and re-review the divergence if the code changes after the
 verdict. The user owns the delivery step; at tier 2 nothing ships without their yes.
 
 ### Depth by risk — who reviews
 
 The tier comes from the path table (`../asdd/references/without-rsc-cli.md` §1). Tier 0 never
-reaches you (docs/copy pass silently); tier 1 → **one fresh-context reviewer** running the most
-relevant pass from the table above; tier 2 → **three parallel fresh-context subagents**, one per
-lens (**correctness**, **security**, **tests**), each told to *refute* readiness, not confirm it.
-Fresh context is the point: a reviewer who inherits the implementer's context inherits its blind
-spots. The closing review is always at least tier 1.
+reaches you (docs/copy pass silently); tier 1 → **one fresh-context reviewer**, the `task-reviewer`
+subagent (`../implement/references/per-task-review.md`); tier 2 → **three parallel fresh-context
+subagents**, one per lens: `refuter-correctness`, `refuter-security`, `refuter-tests`, each
+briefed to *refute* readiness, not confirm it. Fresh context is the point: a reviewer who inherits
+the implementer's context inherits its blind spots. The closing review is always at least tier 1,
+with `task-reviewer` in closing mode (above).
 
-rsc ships named agents for these roles (`refuter-correctness`, `refuter-security`,
-`refuter-tests`, `finding-verifier`); this pack does not. Write each dispatch from this skill's text.
-If your engine cannot start subagents, run the lenses one after another yourself, each from the
-four inputs below only, and record in the review that the context was not independent. At tier 2
-that is a weaker check, and the user decides whether it is enough.
+The briefs are frozen in the subagents themselves (the `refuter-*` lenses, `finding-verifier`):
+what each lens attacks, the blind record, the findings JSON and the `VERDICT:` line. Never write
+your own version of them. **Dispatch** by the rule in `../asdd/references/marcsh.md` §2, with
+exactly the inputs listed. Start the three lenses together and wait for all three inside the turn
+(`task_wait` until each result is in); never end the turn to ask whether to continue.
+
+At tier 2 a pass run by you instead of a subagent is a weaker check: ask the user with the question
+tool (`../asdd/references/marcsh.md` §3) whether it is enough, options "Accept the weaker review",
+"Wait until independent reviewers can run" (recommended) and "Park the task", and record the
+answer verbatim in the review record. In autopilot nobody is asked: park the task as `blocking`.
 
 **Give each refuter exactly four inputs — no more, no less.** The diff alone is not enough, and
 that is not a detail: with only the diff, the one failure class no test suite can structurally
@@ -139,7 +145,10 @@ whole panel.
 2. **The approved spec** (`02-DOCS/wiki/sdd/specs/<slug>.md`).
 3. **The exact source state** — commit SHA, or a tree hash when git is absent. A verdict belongs to
    the state that was reviewed, not to the project.
-4. **The entry point** — the one command that reruns the checks.
+4. **The entry point** — the one command that reruns the checks. The refuters are read-only and do
+   not run it; when a finding needs a run, you run it by the long-command rule
+   (`../verify/references/generic-gate.md`, "Long commands"): a full suite in the background, never
+   a foreground call that hits the 3-minute limit.
 
 **And say what they do not get:** your conversation, your reasoning, your defences, and your draft
 verdict. If a claim needs your justification to stand, it is not proven.
@@ -165,7 +174,7 @@ report one defect three ways, and a lens hunting for something can overstate wha
 steps, in this order:
 
 1. **Group (deterministic).** Each lens ends its report with a ` ```json findings ` block — an
-   array of objects in exactly this shape (give it to every reviewer verbatim):
+   array of objects in exactly this shape (the subagent files carry it verbatim):
 
    ```json
    {"severity":"blocker|should-fix|nit|question","file":"path","line":N,"claim":"…","failure_scenario":"concrete input → wrong result","evidence":"quoted code","class":"bug class"}
@@ -178,10 +187,12 @@ steps, in this order:
    question**. Several lenses on one finding is a reason to look first, never a reason to raise its
    severity.
 2. **Verify (judgement).** **Every blocker and every should-fix** is verified. For each, start a
-   fresh verifier (a subagent if the engine has them, else a separate pass) with that one finding
-   plus the same four inputs, in parallel where possible. It starts from "this is false" and
-   returns **CONFIRMED** (reproduced or traced, with the proof), **REFUTED** (cites the guard that
-   makes it impossible), or **UNPROVEN** (becomes a question). It never gets the lens's reasoning.
+   `finding-verifier` subagent with that one finding (its JSON object) plus the same four inputs,
+   all of them at once (`background: true` and `task_wait` on pi, parallel `Task` calls on Claude;
+   at most 4 run at once on pi, so queue the rest). It starts from "this is false" and returns
+   **CONFIRMED** (reproduced or traced, with the proof), **REFUTED** (cites the guard that makes it
+   impossible), or **UNPROVEN** (becomes a question), as its last line. It never gets the lens's
+   reasoning. When a CONFIRMED proof names a command, run it yourself to see it fail.
 
 Report the consolidated count honestly ("11 reported → 4 unique → 2 confirmed"), and list what was
 refuted and why: a refuted finding hidden from the author is a review nobody can audit. At tier 1

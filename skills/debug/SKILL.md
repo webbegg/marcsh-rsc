@@ -30,7 +30,14 @@ never changes with the register — only the words do.
 
 In short plain sentences, show: the confirmed cause, one line of *why* it produced this symptom, and
 the fix. Ask only what you can't observe yourself (e.g. exact error text). Confirm before a fix that
-changes behavior beyond the bug.
+changes behavior beyond the bug, with the question tool (`../asdd/references/marcsh.md` §3):
+"Fix only the bug" (recommended), "Also change <the behaviour>", and record the answer.
+
+Only the single repro and the new test run in the foreground; everything else follows the
+long-command rule (`../verify/references/generic-gate.md`, "Long commands"). A repro that needs a
+server, a browser or a watcher starts it in the background and stops it once the evidence is
+taken; before you report the fix, list the leftovers and never stop one without the user's yes
+(`../asdd/references/marcsh.md` §7).
 
 ## The loop — five steps, never skipped, never reordered
 
@@ -69,7 +76,10 @@ A bug you cannot reproduce is not a bug you can fix; it's a rumor. Pin it down:
 The cause is somewhere in a large space; cut it in half, repeatedly, with evidence.
 
 - **Across history:** `git bisect` between a known-good and known-bad commit to land on the exact
-  change that introduced it. Let the repro be the bisect's good/bad oracle.
+  change that introduced it. Let the repro be the bisect's good/bad oracle. `git bisect run
+  <repro>` runs by the long-command rule: in the background (`bg_start` on pi, the Bash tool's
+  background option on Claude) or with an explicit `timeout`, never a plain foreground call;
+  finish with `git bisect reset`.
 - **Across code:** disable/short-circuit half the suspect path; see which half keeps the symptom.
 - **Across inputs/data:** shrink the failing input to the minimal case that still fails.
 - **One variable per step.** Two changes at once and you've learned nothing about either. Write down

@@ -1,0 +1,574 @@
+#!/bin/sh
+# leftovers — list, count or stop the processes this marcsh session left running.
+#
+# Usage:
+#   leftovers                                      one line per leftover process:
+#                                                  PID:STARTKEY  AGE  RSS_MB  COMMAND [possibly yours: REASON]
+#   leftovers --count                              just the number
+#   leftovers --stop [--confirmed] PID:STARTKEY... stop these listed processes
+#
+# A process belongs to this session when its environment holds MARCSH_SESSION equal to the
+# caller's own $MARCSH_SESSION. marcsh sets that marker on every process its tools start, and
+# Claude's Bash children inherit it, so this is the Claude-engine path (on pi, `proc_list` and
+# `proc_stop` do the same) and the subagents' one. Matching is by the marker only, never by name
+# or folder: a process the user started never shows. As marcsh's own scanner, it leaves out:
+#   - anything still under marcsh. The root is the nearest ancestor of this script whose
+#     environment holds the marker while its parent's does not (on Claude, the Claude CLI); it
+#     and every live process under it (running tool calls, background shells, MCP servers) have
+#     an owner and are not leftovers;
+#   - processes marked MARCSH_INFRA=1 (marcsh's own machinery), zombies, this script, the chain
+#     of processes that runs it and its own children.
+# A leftover is flagged `[possibly yours: REASON]` when it has a controlling terminal, leads its
+# own session, or runs under a marked process that does (on Linux also: its session's leader is
+# marked and not under marcsh). A long-lived program a tool call started (an editor, tmux, a
+# daemon) passes the marker on to what the user later opens through it.
+# Command lines are shown redacted as marcsh does (--*token*=, --*key*=, --*secret*=,
+# --password VALUE, -pVALUE after mysql/mariadb, Bearer/Basic VALUE, scheme://user:VALUE@), cut
+# to 120 characters; the environment is never printed. STARTKEY is the start time: epoch seconds
+# on macOS, the /proc start ticks on Linux.
+#
+# --stop takes the PID:STARTKEY of the listing; a bare pid is refused. Right before every signal
+# it reads the process table again and checks that the pid still has that start time, still
+# carries the marker and is still a leftover. It refuses a reused pid (another start time), an
+# unmarked, MARCSH_INFRA=1 or still-under-marcsh process, this script's own chain, and a
+# possibly-yours one unless --confirmed is given: pass it only after the user answered yes to
+# stopping that process (the question tool). TERM, up to 2 s, then KILL only when the same
+# checks still pass. `stopped` is printed only once the pid is really gone; otherwise
+# `not stopped PID:STARTKEY: REASON`. Nothing else is ever signalled.
+#
+# PATH is fixed to /usr/bin:/bin, so no ps, awk or grep from a project's bin/ runs; kill is the
+# shell's builtin. macOS: one `ps -A -E` for the whole table (and one `ps -p`, without -E, for
+# the command lines of the rows that may hold the marker, matched on pid and start time: the
+# environment is what follows the command); Linux: /proc. No network, no file written.
+# Limit on macOS: the system hides the environment of Apple's own binaries (/bin/sh, /bin/sleep
+# and the like) from `ps -E`, so those are never listed there (and --stop refuses them);
+# third-party programs such as node are seen. On Linux every process of the user is seen.
+# Exit: 0 ok; 1 no marker, the process table could not be read, or a target refused or not
+# stopped; 2 usage.
+
+PATH=/usr/bin:/bin
+export PATH
+set -u
+LC_ALL=C
+TZ=UTC
+export LC_ALL TZ
+TAB=$(printf '\t')
+
+note() { printf 'leftovers: %s\n' "$*" >&2; }
+
+usage() {
+  cat >&2 << 'EOF'
+Usage: leftovers [--count | --stop [--confirmed] PID:STARTKEY...]
+  (no option)   list this session's leftover processes, one per line:
+                PID:STARTKEY  AGE  RSS_MB  COMMAND [possibly yours: REASON]
+  --count       print only how many there are
+  --stop PID:STARTKEY...
+                stop these listed processes: TERM, up to 2 s, then KILL. The marker and
+                the start time are checked again before every signal; a bare pid, a
+                reused pid and anything not listed are refused
+  --confirmed   with --stop: also stop the ones listed as possibly yours. Pass it only
+                after the user answered yes to stopping them (the question tool)
+EOF
+  exit 2
+}
+
+MODE=list
+CONFIRMED=0
+case ${1-} in
+  '') ;;
+  --count) [ $# -eq 1 ] || usage; MODE=count ;;
+  --stop)
+    shift
+    MODE=stop
+    _n=0
+    for _a in "$@"; do
+      case $_a in
+        --confirmed) CONFIRMED=1 ;;
+        -*) note "unknown argument: $_a"; usage ;;
+        *) _n=$((_n + 1)) ;;
+      esac
+    done
+    [ "$_n" -ge 1 ] || usage
+    ;;
+  -h | --help) usage ;;
+  *) note "unknown argument: $1"; usage ;;
+esac
+
+if [ -z "${MARCSH_SESSION-}" ]; then
+  note 'MARCSH_SESSION is not set, so there is no session marker to look for.'
+  note 'Run this from a shell marcsh started (its tools set the marker; older marcsh does not).'
+  exit 1
+fi
+SESSION=$MARCSH_SESSION
+export MARCSH_SESSION
+
+OS=ps
+if [ "$(uname -s 2> /dev/null)" = Linux ] && [ -r /proc/self/stat ]; then OS=linux; fi
+
+# epoch(MON, DAY, HH:MM:SS, YEAR): seconds since 1970 of a UTC `lstart` (Sun Nov  5 09:03:07 2026).
+EPOCH_AWK='
+function epoch(mo, d, t, y,   m, h, yy, era, yoe, doy, doe) {
+  m = index("JanFebMarAprMayJunJulAugSepOctNovDec", mo)
+  if (m == 0 || (m - 1) % 3) return -1
+  m = (m + 2) / 3
+  split(t, h, ":")
+  yy = y - (m <= 2 ? 1 : 0)
+  era = int(yy / 400)
+  yoe = yy - era * 400
+  doy = int((153 * (m > 2 ? m - 3 : m + 9) + 2) / 5) + d - 1
+  doe = yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy
+  return (era * 146097 + doe - 719468) * 86400 + h[1] * 3600 + h[2] * 60 + h[3]
+}'
+
+# The table, one row per process, tab-separated:
+#   pid ppid pgid startkey age rssKB zombie tty leader sid envread marked infra command
+# (sid: Linux only; envread: its environment could be read; command: marked rows only).
+
+# macOS: `ps -A -E` with the environment after the command; the command alone comes from a
+# `ps -p` (no -E) for the rows that may hold the marker and for the script's parent chain.
+PS_AWK=$EPOCH_AWK'
+function lastval(env, name,   n, w, i, v, l) {
+  n = split(env, w, " ")
+  l = length(name) + 1
+  v = ""
+  for (i = 1; i <= n; i++) if (substr(w[i], 1, l) == name "=") v = substr(w[i], l + 1)
+  return v
+}
+BEGIN { S = ENVIRON["MARCSH_SESSION"]; tok = "MARCSH_SESSION=" S }
+{
+  # A line that does not parse is the rest of an environment value holding a newline.
+  if (!match($0, /^ *[0-9]+ +[0-9]+ +[0-9]+ +[^ ]+ +[^ ]+ +[A-Z][a-z][a-z] +[A-Z][a-z][a-z] +[0-9]+ +[0-9]+:[0-9]+:[0-9]+ +[0-9]+ +[0-9]+ /)) next
+  split(substr($0, 1, RLENGTH), f, " ")
+  pid = f[1]
+  if (pid in par) next
+  par[pid] = f[2]; pg[pid] = f[3]; st[pid] = f[4]; tt[pid] = f[5]
+  key[pid] = epoch(f[7], f[8], f[9], f[10]); rss[pid] = f[11]
+  rest[pid] = substr($0, RLENGTH + 1)
+  order[++n] = pid
+}
+END {
+  list = ""
+  p = self
+  for (d = 0; d < 256 && (p in par); d++) { list = list "," p; if (par[p] + 0 <= 1) break; p = par[p] }
+  for (k = 1; k <= n; k++) if (index(rest[order[k]], tok)) list = list "," order[k]
+  if (list != "") {
+    c = "ps -ww -o pid=,lstart=,command= -p " substr(list, 2) " 2>/dev/null"
+    while ((c | getline line) > 0) {
+      # (ps pads the lstart column: any number of spaces before the command)
+      if (!match(line, /^ *[0-9]+ +[A-Z][a-z][a-z] +[A-Z][a-z][a-z] +[0-9]+ +[0-9]+:[0-9]+:[0-9]+ +[0-9]+ +/)) continue
+      split(substr(line, 1, RLENGTH), g, " ")
+      if (!(g[1] in par) || epoch(g[3], g[4], g[5], g[6]) != key[g[1]]) continue
+      cmd[g[1]] = substr(line, RLENGTH + 1)
+    }
+    close(c)
+  }
+  for (k = 1; k <= n; k++) {
+    pid = order[k]; rd = 0; mk = 0; inf = 0; cm = ""
+    if ((pid in cmd) && substr(rest[pid], 1, length(cmd[pid])) == cmd[pid]) {
+      env = substr(rest[pid], length(cmd[pid]) + 1)
+      rd = (env ~ /[^ \t]/) ? 1 : 0
+      if (rd && lastval(env, "MARCSH_SESSION") == S) {
+        mk = 1
+        cm = cmd[pid]
+        inf = (lastval(env, "MARCSH_INFRA") == "1") ? 1 : 0
+      }
+    }
+    age = now - key[pid]
+    if (age < 0) age = 0
+    printf "%s\t%s\t%s\t%s\t%d\t%s\t%d\t%d\t%d\t\t%d\t%d\t%d\t%s\n", pid, par[pid], pg[pid], key[pid], age, rss[pid],
+      ((st[pid] ~ /^Z/) ? 1 : 0), ((tt[pid] != "??" && tt[pid] != "-") ? 1 : 0), (index(st[pid], "s") ? 1 : 0), rd, mk, inf, cm
+  }
+}'
+
+scan_ps() {
+  _tab=$(ps -A -ww -E -o pid=,ppid=,pgid=,stat=,tt=,lstart=,rss=,command= 2> /dev/null) || return 1
+  [ -n "$_tab" ] || return 1
+  printf '%s\n' "$_tab" | awk -v self="$$" -v now="$(date +%s)" "$PS_AWK"
+}
+
+# Linux: every /proc/<pid>/stat; the marked pids, their MARCSH_INFRA and command line come in on
+# stdin (pid, infra, command).
+LINUX_AWK='
+function stat(p,   f, l, i, j, r) {
+  f = "/proc/" p "/stat"
+  l = ""
+  if ((getline l < f) <= 0) { close(f); return 0 }
+  close(f)
+  i = 0; r = l
+  while ((j = index(r, ")")) > 0) { i += j; r = substr(r, j + 1) }
+  if (!i || l + 0 != p + 0) return 0
+  split(substr(l, i + 2), s, " ")
+  return 1
+}
+BEGIN { FS = "\t" }
+{ mk[$1] = 1; inf[$1] = $2 + 0; c = $0; sub(/^[^\t]*\t[^\t]*\t/, "", c); cm[$1] = c }
+END {
+  n = split(pids, P, " ")
+  for (k = 1; k <= n; k++) {
+    p = P[k]
+    if (!stat(p)) continue
+    ok[p] = 1; state[p] = s[1]; par[p] = s[2]; pg[p] = s[3]; sid[p] = s[4]; tty[p] = s[5]
+    key[p] = s[20]; rss[p] = int(s[22] * pg_size / 1024)
+  }
+  # The environment of the parent chain: readable or not.
+  p = self
+  for (d = 0; d < 256 && (p in ok); d++) {
+    e = "/proc/" p "/environ"
+    if ((getline tmp < e) >= 0) rd[p] = 1
+    close(e)
+    if (par[p] + 0 <= 1) break
+    p = par[p]
+  }
+  for (k = 1; k <= n; k++) {
+    p = P[k]
+    if (!(p in ok)) continue
+    m = (p in mk) ? 1 : 0
+    age = int(up - key[p] / hz)
+    if (age < 0) age = 0
+    printf "%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s\t%d\t%d\t%d\t%s\n", p, par[p], pg[p], key[p], age, rss[p],
+      ((state[p] == "Z") ? 1 : 0), ((tty[p] != 0) ? 1 : 0), ((sid[p] == p) ? 1 : 0), sid[p], ((m || (p in rd)) ? 1 : 0), m,
+      (m ? inf[p] : 0), (m ? cm[p] : "")
+  }
+}'
+
+scan_linux() {
+  _hz=$(getconf CLK_TCK 2> /dev/null)
+  case $_hz in '' | *[!0-9]*) _hz=100 ;; esac
+  _pg=$(getconf PAGESIZE 2> /dev/null)
+  case $_pg in '' | *[!0-9]*) _pg=4096 ;; esac
+  _up=$(awk '{ print $1 }' /proc/uptime 2> /dev/null)
+  [ -n "$_up" ] || return 1
+  _pids=''
+  for _d in /proc/[0-9]*; do _pids="$_pids ${_d#/proc/}"; done
+  [ -n "$_pids" ] || return 1
+  if printf 'x\000' | grep -qzxF x 2> /dev/null; then
+    _marked=$(cd /proc && grep -lzxF -e "MARCSH_SESSION=$SESSION" -- [0-9]*/environ 2> /dev/null | sed 's|/environ$||')
+  else
+    _marked=''
+    for _p in $_pids; do
+      tr '\0' '\n' < "/proc/$_p/environ" 2> /dev/null | grep -qxF -e "MARCSH_SESSION=$SESSION" && _marked="$_marked $_p"
+    done
+  fi
+  for _p in $_marked; do
+    case $_p in '' | *[!0-9]*) continue ;; esac
+    _inf=$(tr '\0' '\n' < "/proc/$_p/environ" 2> /dev/null | awk 'index($0, "MARCSH_INFRA=") == 1 { v = substr($0, 14) } END { print (v == "1") ? 1 : 0 }')
+    _cmd=$(tr '\0\n\t' '   ' < "/proc/$_p/cmdline" 2> /dev/null)
+    [ -n "$_cmd" ] || _cmd="[$(cat "/proc/$_p/comm" 2> /dev/null)]"
+    printf '%s\t%s\t%s\n' "$_p" "${_inf:-0}" "$_cmd"
+  done | awk -v self="$$" -v pids="$_pids" -v up="$_up" -v hz="$_hz" -v pg_size="$_pg" "$LINUX_AWK"
+}
+
+# The classified table: `pid  startkey  class  reason  line`, tab-separated, one row per process.
+# class: leftover, yours (a leftover possibly the user's; reason says why), under (still under
+# marcsh), infra, unmarked, self (this script's chain or its own child) or zombie; line: the
+# listing line of a leftover.
+CLASSIFY_AWK='
+BEGIN { FS = "\t"; Q = sprintf("%c", 39) }
+{
+  p = $1; par[p] = $2; key[p] = $4; age[p] = $5; rss[p] = $6; zb[p] = $7; tty[p] = $8; lead[p] = $9
+  sid[p] = $10; rd[p] = $11; mk[p] = $12; inf[p] = $13
+  c = $0
+  for (i = 1; i <= 13; i++) c = substr(c, index(c, "\t") + 1)
+  cmd[p] = c
+  order[++n] = p
+}
+function under(p,   d) {
+  if (root == "") return 0
+  for (d = 0; d < 256 && (p in par); d++) {
+    if (p == root) return 1
+    if (par[p] + 0 <= 1) return 0
+    p = par[p]
+  }
+  return 0
+}
+function own(p,   d) {
+  for (d = 0; d < 256 && (p in par); d++) {
+    if (p == self) return 1
+    if (par[p] + 0 <= 1) return 0
+    p = par[p]
+  }
+  return 0
+}
+function yours(p,   a, d, l) {
+  if (tty[p]) return "it has a terminal"
+  if (lead[p]) return "it leads its own session (like an editor, tmux or a daemon)"
+  a = par[p]
+  for (d = 0; d < 256 && a + 0 > 1 && (a in par) && mk[a]; d++) {
+    if (tty[a] || lead[a]) return "it runs under pid " a ", which leads a session (like an editor or tmux)"
+    a = par[a]
+  }
+  l = sid[p]
+  if (l != "" && l + 0 > 1 && (l in par) && mk[l] && l != self && !under(l)) return "it is in the session pid " l " leads, which is not a tool call" Q "s shell"
+  return ""
+}
+# The text after word w[i] up to a quote: the value of Bearer, Basic, Authorization:.
+function value_out(s) {
+  if (match(s, "^[^" Q "\"]+")) return "***" substr(s, RLENGTH + 1)
+  return s
+}
+function redact(c,   n, w, i, lw, mysql, name, seg, k, j, out) {
+  n = split(c, w, " ")
+  mysql = 0
+  for (i = 1; i <= n; i++) {
+    lw = tolower(w[i])
+    sub(/^.*\//, "", lw)
+    if (lw ~ /^(mysql|mariadb)[a-z0-9_-]*$/) mysql = 1
+  }
+  for (i = 1; i <= n; i++) {
+    lw = tolower(w[i])
+    if (match(w[i], /^--?[A-Za-z0-9_.-]*=/) && RLENGTH < length(w[i])) {
+      name = tolower(substr(w[i], 1, RLENGTH - 1))
+      if (name ~ /token|key|secret|passwd|password|pwd/) w[i] = substr(w[i], 1, RLENGTH) "***"
+    }
+    if ((match(w[i], /^[A-Z][A-Z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|ACCESS_KEY|PRIVATE_KEY)[A-Z0-9_]*=/) ||
+      match(w[i], /[^A-Za-z0-9_][A-Z][A-Z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|ACCESS_KEY|PRIVATE_KEY)[A-Z0-9_]*=/)) &&
+      RSTART + RLENGTH <= length(w[i]))
+      w[i] = substr(w[i], 1, RSTART + RLENGTH - 1) "***"
+    if (match(w[i], /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^:\/@]+:[^@\/]+@/)) {
+      seg = substr(w[i], RSTART, RLENGTH)
+      k = index(seg, "://")
+      j = index(substr(seg, k + 3), ":")
+      w[i] = substr(w[i], 1, RSTART - 1 + k + 2 + j) "***@" substr(w[i], RSTART + RLENGTH)
+    }
+    if (mysql && w[i] ~ /^-p./) w[i] = "-p***"
+    if (i < n && lw ~ /^--(password|passwd|token|secret|api-key|apikey|access-token|auth-token)$/ && w[i + 1] !~ /^-/) {
+      w[i + 1] = "***"
+      i++
+      continue
+    }
+    if (i < n && (lw ~ /^(bearer|basic)$/ || lw ~ /[^a-z0-9_](bearer|basic)$/)) {
+      w[i + 1] = value_out(w[i + 1])
+      i++
+      continue
+    }
+    if (match(lw, /authorization:/)) {
+      if (RSTART + RLENGTH <= length(lw)) {
+        if (substr(lw, RSTART + RLENGTH) !~ /^(bearer|basic)$/) w[i] = substr(w[i], 1, RSTART + RLENGTH - 1) value_out(substr(w[i], RSTART + RLENGTH))
+      } else if (i < n && tolower(w[i + 1]) !~ /^(bearer|basic)$/) {
+        w[i + 1] = value_out(w[i + 1])
+        i++
+        continue
+      }
+    }
+  }
+  out = ""
+  for (i = 1; i <= n; i++) out = out (i > 1 ? " " : "") w[i]
+  return out
+}
+function fmt_age(s,   d, h, m) {
+  d = int(s / 86400); h = int((s % 86400) / 3600); m = int((s % 3600) / 60); s = s % 60
+  if (d > 0) return sprintf("%d-%02d:%02d:%02d", d, h, m, s)
+  if (h > 0) return sprintf("%02d:%02d:%02d", h, m, s)
+  return sprintf("%02d:%02d", m, s)
+}
+function render(p, why,   c) {
+  c = cmd[p]
+  gsub(/[[:cntrl:]]/, " ", c)
+  gsub(/  +/, " ", c)
+  sub(/^ /, "", c)
+  sub(/ $/, "", c)
+  if (c == "") c = "(command unknown)"
+  c = redact(c)
+  if (length(c) > 120) c = substr(c, 1, 120)
+  return sprintf("%s:%s  %s  %.1fMB  %s%s", p, key[p], fmt_age(age[p]), rss[p] / 1024, c, (why != "") ? " [possibly yours: " why "]" : "")
+}
+END {
+  # The root: the topmost marked process of the chain above this script, up to the first one
+  # whose environment can be read and has no marker (one that cannot be read is passed over).
+  root = ""
+  p = self
+  for (d = 0; d < 256 && (p in par); d++) {
+    if (mk[p]) root = p
+    else if (rd[p]) break
+    if (par[p] + 0 <= 1) break
+    p = par[p]
+  }
+  chain = " "
+  p = self
+  for (d = 0; d < 256 && (p in par); d++) {
+    chain = chain p " "
+    if (par[p] + 0 <= 1) break
+    p = par[p]
+  }
+  for (k = 1; k <= n; k++) {
+    p = order[k]
+    why = ""
+    show = ""
+    if (zb[p]) cl = "zombie"
+    else if (index(chain, " " p " ") || own(p)) cl = "self"
+    else if (!mk[p] || p + 0 <= 1) cl = "unmarked"
+    else if (inf[p]) cl = "infra"
+    else if (under(p)) cl = "under"
+    else {
+      why = yours(p)
+      cl = (why != "") ? "yours" : "leftover"
+      show = render(p, why)
+    }
+    printf "%s\t%s\t%s\t%s\t%s\n", p, key[p], cl, why, show
+  }
+}'
+
+# snapshot: the classified table on stdout; fails when the process table cannot be read.
+snapshot() {
+  if [ "$OS" = linux ]; then _raw=$(scan_linux) || return 1; else _raw=$(scan_ps) || return 1; fi
+  [ -n "$_raw" ] || return 1
+  printf '%s\n' "$_raw" | awk -v self="$$" "$CLASSIFY_AWK"
+}
+
+# lookup PID: C_KEY, C_CLASS and C_WHY of PID in $SNAP; returns 1 when it is not in the table.
+lookup() {
+  _l=$(printf '%s\n' "$SNAP" | awk -F '\t' -v p="$1" '$1 == p { print $2 "\t" $3 "\t" $4; exit }')
+  [ -n "$_l" ] || return 1
+  C_KEY=${_l%%"$TAB"*}
+  _l=${_l#*"$TAB"}
+  C_CLASS=${_l%%"$TAB"*}
+  C_WHY=${_l#*"$TAB"}
+}
+
+# class_text CLASS: why a process of that class is not stopped.
+class_text() {
+  case $1 in
+    self) echo 'this script, the shell that runs it, or a child of the script' ;;
+    unmarked) echo 'not started by this marcsh session (no MARCSH_SESSION marker, or its environment cannot be read)' ;;
+    infra) echo 'marcsh'"'"'s own machinery (MARCSH_INFRA=1)' ;;
+    under) echo 'still under marcsh: a running tool call, background shell or MCP server, or the engine itself' ;;
+    *) echo "not a leftover ($1)" ;;
+  esac
+}
+
+# pstate PID KEY: same (running, with that start key), other (another start key, or a zombie) or
+# absent (no such row).
+pstate() {
+  if [ "$OS" = linux ]; then
+    awk -v p="$1" -v k="$2" 'BEGIN {
+      f = "/proc/" p "/stat"
+      if ((getline l < f) <= 0) { print "absent"; exit }
+      i = 0; r = l
+      while ((j = index(r, ")")) > 0) { i += j; r = substr(r, j + 1) }
+      split(substr(l, i + 2), s, " ")
+      print (s[1] != "Z" && s[20] == k) ? "same" : "other"
+    }'
+  else
+    ps -o stat=,lstart= -p "$1" 2> /dev/null | awk -v k="$2" "$EPOCH_AWK"'
+      match($0, /^ *[^ ]+ +[A-Z][a-z][a-z] +[A-Z][a-z][a-z] +[0-9]+ +[0-9]+:[0-9]+:[0-9]+ +[0-9]+/) {
+        split($0, f, " ")
+        s = (f[1] !~ /^Z/ && epoch(f[3], f[4], f[5], f[6]) == k) ? "same" : "other"
+      }
+      END { print (s == "") ? "absent" : s }'
+  fi
+}
+
+# gone PID KEY: the process PID:KEY no longer runs (its pid is free, a zombie, or another's).
+gone() {
+  case $(pstate "$1" "$2") in
+    other) return 0 ;;
+    absent) kill -0 "$1" 2> /dev/null && return 1; return 0 ;;
+  esac
+  return 1
+}
+
+nap() { sleep 0.2 2> /dev/null || sleep 1; }
+
+# stop_one PID:KEY: prints one result line; returns 0 when the process is gone afterwards.
+stop_one() {
+  _t=$1
+  case $_t in
+    *[!0-9]*) ;;
+    *) echo "refused $_t: a bare pid; give PID:STARTKEY as the listing prints it"; return 1 ;;
+  esac
+  _pid=${_t%%:*}
+  _key=${_t#*:}
+  case $_pid:$_key in
+    *[!0-9:]* | :* | *: | *:*:*) echo "refused $_t: not PID:STARTKEY as the listing prints it"; return 1 ;;
+  esac
+  if ! SNAP=$(snapshot); then
+    echo "not stopped $_t: the process table could not be read; no signal sent"
+    return 1
+  fi
+  if ! lookup "$_pid"; then
+    if kill -0 "$_pid" 2> /dev/null; then
+      echo "refused $_t: that pid is not in the process table just read (a new process?); no signal sent"
+      return 1
+    fi
+    echo "gone $_t: not running"
+    return 0
+  fi
+  if [ "$C_KEY" != "$_key" ]; then
+    echo "refused $_t: that pid now belongs to another process (start key $C_KEY)"
+    return 1
+  fi
+  case $C_CLASS in
+    zombie) echo "gone $_t: it has exited (a zombie until its parent reaps it)"; return 0 ;;
+    leftover) ;;
+    yours)
+      if [ "$CONFIRMED" != 1 ]; then
+        echo "refused $_t: possibly yours ($C_WHY); stop it only after the user said yes, with --confirmed"
+        return 1
+      fi
+      ;;
+    *) echo "refused $_t: $(class_text "$C_CLASS")"; return 1 ;;
+  esac
+  kill -TERM "$_pid" 2> /dev/null
+  _i=0
+  while [ "$_i" -lt 10 ]; do
+    if gone "$_pid" "$_key"; then echo "stopped $_t"; return 0; fi
+    nap
+    _i=$((_i + 1))
+  done
+  if gone "$_pid" "$_key"; then echo "stopped $_t"; return 0; fi
+  # Still there after 2 s: the same checks again before KILL.
+  if ! SNAP=$(snapshot); then
+    echo "not stopped $_t: still running after TERM, and the process table could not be read again; no KILL sent"
+    return 1
+  fi
+  if ! lookup "$_pid" || [ "$C_KEY" != "$_key" ] || [ "$C_CLASS" = zombie ]; then
+    if gone "$_pid" "$_key"; then echo "stopped $_t"; return 0; fi
+    echo "not stopped $_t: still running after TERM, but it cannot be checked again; no KILL sent"
+    return 1
+  fi
+  case $C_CLASS in
+    leftover) ;;
+    yours)
+      if [ "$CONFIRMED" != 1 ]; then
+        echo "not stopped $_t: still running after TERM, and now possibly yours ($C_WHY); no KILL sent"
+        return 1
+      fi
+      ;;
+    *)
+      echo "not stopped $_t: still running after TERM, and now $(class_text "$C_CLASS"); no KILL sent"
+      return 1
+      ;;
+  esac
+  kill -KILL "$_pid" 2> /dev/null
+  _i=0
+  while [ "$_i" -lt 5 ]; do
+    if gone "$_pid" "$_key"; then echo "stopped $_t (KILL: it did not exit within 2 s of TERM)"; return 0; fi
+    nap
+    _i=$((_i + 1))
+  done
+  echo "not stopped $_t: still running after KILL"
+  return 1
+}
+
+case $MODE in
+  stop)
+    rc=0
+    for _a in "$@"; do
+      [ "$_a" = --confirmed ] && continue
+      stop_one "$_a" || rc=1
+    done
+    exit "$rc"
+    ;;
+  *)
+    if ! SNAP=$(snapshot); then
+      note 'could not read the process table; nothing listed'
+      exit 1
+    fi
+    printf '%s\n' "$SNAP" | awk -F '\t' -v mode="$MODE" '
+      $3 == "leftover" || $3 == "yours" { n++; if (mode == "list") print $5 }
+      END {
+        if (mode == "count") print n + 0
+        else if (!n) print "leftovers: no leftover processes for this session" > "/dev/stderr"
+      }'
+    ;;
+esac
