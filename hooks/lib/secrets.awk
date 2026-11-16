@@ -5,6 +5,9 @@
 # Prints the hits on one line, `<file>: <kind>; ...` (never the value; at most 10), and exits 3
 # when there is one, else 0. Run with LC_ALL=C.
 #
+# With -v multi=1 the input is `git diff-tree --stdin -p` output, where a commit id line starts
+# the diff of that commit: one `<id><TAB><hits>` line per diff with hits (exit 3 when any).
+#
 # Two kinds of hit, so that ordinary code is not blocked:
 # 1. A concrete key format, anywhere: AWS access key id (AKIA/ASIA), GitHub token (ghp_ gho_ ghu_
 #    ghs_ ghr_ github_pat_), Slack token (xoxa- xoxb- xoxp- xoxr- xoxs-), live Stripe key
@@ -38,6 +41,19 @@ BEGIN {
   GOOG_RE = "AIza" rep(b64, 35)
   file = ""
   n = 0
+}
+
+# flush(): the hit line of the diff of commit sect (multi), then a fresh state for the next one.
+function flush() {
+  if (n > 0) {
+    print sect "\t" out (n > 10 ? "; ... and " (n - 10) " more" : "")
+    any = 1
+  }
+  n = 0
+  out = ""
+  file = ""
+  envfile = 0
+  split("", SEEN)
 }
 
 function hit(kind,   key) {
@@ -115,6 +131,8 @@ function scan_env(line,   name, v) {
   return secret_name(name) && !placeholder(v)
 }
 
+multi && (length($0) == 40 || length($0) == 64) && $0 !~ /[^0-9a-f]/ { flush(); sect = $0; next }
+
 substr($0, 1, 4) == "+++ " {
   file = substr($0, 5)
   if (file == "/dev/null") file = ""
@@ -140,6 +158,10 @@ substr($0, 1, 1) == "+" && file != "" {
 }
 
 END {
+  if (multi) {
+    flush()
+    exit any ? 3 : 0
+  }
   if (n == 0) exit 0
   print out (n > 10 ? "; ... and " (n - 10) " more" : "")
   exit 3

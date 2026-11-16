@@ -24,13 +24,14 @@ gate_authorship_file() {
   block "git commit: the message file $2 credits an AI ($_ga_r). Commits ship under the responsible person's name only (ship skill, the hard rule); remove that line and commit again."
 }
 
-# gate_authorship_push [SRC] [WHAT] — `git push`: the messages of <default>..SRC (default HEAD).
+# gate_authorship_push [SRC] [WHAT] [REV] — `git push`: the messages of <default>..REV (default
+# SRC, default HEAD); SRC names it in the message.
 gate_authorship_push() {
   if [ "$RSC_HAS_DEFAULT" != 1 ]; then
     note "git push: no default branch (origin/HEAD, main or master) in $RSC_TOP; authorship and secrets not checked. Fix: git remote set-head origin -a"
     return 0
   fi
   _ga_src=${1:-HEAD}
-  _ga_r=$(rsc_git "$RSC_TOP" log --format=%B "$RSC_DEFAULT_REF..$_ga_src" 2> /dev/null | awk -f "$LIB/msg-check.awk" -f "$LIB/msg-scan.awk") && return 0
+  _ga_r=$(rsc_git "$RSC_TOP" log --format=%B "$RSC_DEFAULT_REF..${3:-$_ga_src}" 2> /dev/null | awk -f "$LIB/msg-check.awk" -f "$LIB/msg-scan.awk") && return 0
   block "${2:-git push}: a commit in $RSC_DEFAULT_REF..$_ga_src credits an AI ($_ga_r). Commits ship under the responsible person's name only (ship skill, the hard rule); strip it (git commit --amend, or git rebase -i $RSC_DEFAULT_REF) and push again."
 }

@@ -4,6 +4,8 @@
 # Input: optional `\001P` section of extra paths (one per line), then `\001D` and unified diffs
 # (-U0, --no-renames, so a rename counts on both sides). Paths come from the `diff --git` headers.
 # Output: tier=, base=, reason= lines (risk-tier.sh describes them). Run with LC_ALL=C.
+# With -v multi=1 the input is `git diff-tree --stdin -p` output, where a commit id line starts
+# the diff of that commit: each diff gets its own report, after a `section=<id>` line.
 
 function in_set(word, set) { return index(" " set " ", " " word " ") > 0 }
 
@@ -100,6 +102,35 @@ function scan(line, f,   l) {
   if (l ~ /alter[ \t]+table|drop[ \t]+table|drop[ \t]+column|create[ \t]+table|add[ \t]+column|rename[ \t]+column/) hit("migrations", "schema change", f)
 }
 
+# reset(): a fresh state for the next diff (multi).
+function reset() {
+  NP = 0
+  NHITS = 0
+  file = ""
+  split("", PATHS)
+  split("", PL)
+  split("", SEEN)
+  split("", HITS)
+  split("", SKIP)
+}
+
+function report(   top, i, shown) {
+  if (NP == 0) { print "tier=none"; print "base=" base; print "reason=nothing to classify"; return }
+  top = 0
+  for (i = 1; i <= NP; i++) { T[i] = classify(PL[i]); C[i] = CLASS; if (T[i] > top) top = T[i] }
+  if (NHITS > 0) top = 2
+  print "tier=" top
+  print "base=" base
+  shown = 0
+  for (i = 1; i <= NP; i++) {
+    if (T[i] != top) continue
+    shown++
+    if (shown <= 20) print "reason=path " C[i] ": " PL[i]
+  }
+  for (i = 1; i <= NHITS; i++) { shown++; if (shown <= 20) print "reason=" HITS[i] }
+  if (shown > 20) print "reason=... and " (shown - 20) " more"
+}
+
 BEGIN {
   c16 = ""
   for (i = 0; i < 16; i++) c16 = c16 "[0-9A-Z]"
@@ -109,6 +140,13 @@ BEGIN {
   GH_RE = "gh[pousr]_" c20
   LIVE_RE = "[sr]k_live_[0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z]"
   mode = "D"
+}
+
+multi && (length($0) == 40 || length($0) == 64) && $0 !~ /[^0-9a-f]/ {
+  if (sect != "") { print "section=" sect; report() }
+  reset()
+  sect = $0
+  next
 }
 
 $0 == "\001P" { mode = "P"; next }
@@ -142,18 +180,6 @@ substr($0, 1, 4) == "--- " || substr($0, 1, 4) == "+++ " {
 file != "" && substr($0, 1, 1) == "+" { scan(substr($0, 2), file); next }
 
 END {
-  if (NP == 0) { print "tier=none"; print "base=" base; print "reason=nothing to classify"; exit 0 }
-  top = 0
-  for (i = 1; i <= NP; i++) { T[i] = classify(PL[i]); C[i] = CLASS; if (T[i] > top) top = T[i] }
-  if (NHITS > 0) top = 2
-  print "tier=" top
-  print "base=" base
-  shown = 0
-  for (i = 1; i <= NP; i++) {
-    if (T[i] != top) continue
-    shown++
-    if (shown <= 20) print "reason=path " C[i] ": " PL[i]
-  }
-  for (i = 1; i <= NHITS; i++) { shown++; if (shown <= 20) print "reason=" HITS[i] }
-  if (shown > 20) print "reason=... and " (shown - 20) " more"
+  if (!multi) report()
+  else if (sect != "") { print "section=" sect; report() }
 }

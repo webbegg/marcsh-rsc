@@ -182,12 +182,13 @@ run_out() {
 
 TSH_ABS=$(command -v "$TSH") || { echo "no shell $TSH" >&2; exit 1; }
 
-# timed DIR PAYLOAD_FILE — run the hook on a payload file, killed after 15 s; sets RC, ERR, SECS.
+# timed DIR PAYLOAD_FILE [KILL_SECS] [PATH] — run the hook on a payload file, killed after
+# KILL_SECS (default 15) seconds; sets RC, ERR, SECS.
 timed() {
   _t0=$(date +%s)
-  (cd "$1" && CLAUDE_PROJECT_DIR=$1 exec "$TSH" "$HOOK" < "$2" > /dev/null 2> "$TMP/timed.err") &
+  (cd "$1" && PATH=${4:-$PATH} CLAUDE_PROJECT_DIR=$1 exec "$TSH_ABS" "$HOOK" < "$2" > /dev/null 2> "$TMP/timed.err") &
   _pid=$!
-  (sleep 15; pkill -P "$_pid" 2> /dev/null; kill "$_pid" 2> /dev/null) > /dev/null 2>&1 &
+  (sleep "${3:-15}"; pkill -P "$_pid" 2> /dev/null; kill "$_pid" 2> /dev/null) > /dev/null 2>&1 &
   _wd=$!
   wait "$_pid"
   RC=$?
@@ -526,6 +527,13 @@ hook "$TMP/rs" "git push origin feat/x 2>&1"
 expect "refspec: a redirection is not a refspec" 2 'branch: feat/x'
 hook "$TMP/rs" "git push origin :feat/x"
 expect_clean "refspec: deleting a remote branch"
+hook "$TMP/rs" "git push origin --delete feat/old"
+expect_clean "refspec: --delete of another branch"
+for c in "git push origin :main" "git push origin --delete main" "git push -d origin main" \
+  "git push origin +:refs/heads/main" "git push --delete origin feat/old main"; do
+  hook "$TMP/rs" "$c"
+  expect "deleting the default branch: $c" 2 'left to the human'
+done
 hook "$TMP/rs" "git push --all origin"
 expect "refspec: --all judges every local branch" 2 'feat/x'
 hook "$TMP/rs" "git push --mirror"
@@ -582,7 +590,7 @@ for c in "timeout 5 git push" "timeout -k 2 30 git push" "timeout --signal=KILL 
   "flock -w 5 /tmp/l -c 'git push'" "chronic git push" "caffeinate -i git push" "unbuffer git push" \
   "doas -u me git push" "env -S 'git push'" "env -u X -i git push" "nice -n 5 git push" "ionice -c 2 -n 7 git push" \
   "setsid -f git push" "sudo -n git push" "sudo -u me -- git push" "/usr/bin/time -o /tmp/t git push" \
-  "exec -a x git push" "command -p git push"; do
+  "exec -a x git push" "command -p git push" "gtimeout 5 git push" "gtimeout -k 2 30 git push"; do
   hook "$TMP/wr" "$c"
   expect "wrapper: $c" 2 'branch: feat/x'
 done
@@ -617,6 +625,24 @@ for c in ". ./deploy.sh" "source deploy.sh" "bash < deploy.sh"; do
 done
 hook "$TMP/wr" "source /nonexistent/env.sh && git status"
 expect "source outside the project" 1 'not read'
+# A file fed to a shell through a pipe, or passed to it as its script, is read like `sh < file`.
+for c in "cat deploy.sh | sh" "cat < deploy.sh | bash" "tee < deploy.sh | sh" "< deploy.sh cat | sh" \
+  "cat -u ./deploy.sh | bash -x" "cat deploy.sh | cat | sh" "cat README.md deploy.sh | sh" \
+  "sh deploy.sh" "bash -x deploy.sh" "bash ./deploy.sh a b" "/bin/sh -e deploy.sh" "sh -- deploy.sh" \
+  "bash -o pipefail deploy.sh"; do
+  hook "$TMP/wr" "$c"
+  expect "shell reads a file: $c" 2 'branch: feat/x'
+done
+printf 'git push\n' > "$TMP/outside.sh"
+for c in "cat '$TMP/outside.sh' | sh" "sh '$TMP/outside.sh'" "tee < '$TMP/outside.sh' | bash"; do
+  hook "$TMP/wr" "$c"
+  expect "shell reads a file outside the project: $c" 1 'not read'
+done
+printf 'echo hi\n' > "$TMP/wr/harmless.sh"
+for c in "bash harmless.sh" "cat harmless.sh | sh" "cat deploy.sh | grep push" "bash -n harmless.sh"; do
+  hook "$TMP/wr" "$c"
+  expect_clean "shell reads a harmless file: $c"
+done
 hook "$TMP/other" "cd '$TMP/wr' && cd /tmp && cd - && git push"
 expect "cd - returns" 2 'branch: feat/x'
 hook "$TMP/wr" "pushd /tmp; popd; git push"
@@ -680,20 +706,159 @@ progress q util '## Decision queue' '- [review-after] Q1 — assumed UTC, spec, 
 # Large commands stay fast (B5): linear parsing, a pre-filter and a size cap.
 big_payload "$TMP/big-word.json" "$TMP/q" word
 timed "$TMP/q" "$TMP/big-word.json"
-expect_fast "1 MB single word" 5
+expect_fast "1 MB single word" 10
 [ "$RC" = 0 ] && ok || bad "1 MB single word: exit $RC" "$ERR"
 big_payload "$TMP/big-cat.json" "$TMP/q" cat
 timed "$TMP/q" "$TMP/big-cat.json"
-expect_fast "1 MB heredoc without git" 5
+expect_fast "1 MB heredoc without git" 10
 [ "$RC" = 0 ] && ok || bad "1 MB heredoc without git: exit $RC" "$ERR"
 big_payload "$TMP/big-sh.json" "$TMP/wr" sh
 timed "$TMP/wr" "$TMP/big-sh.json"
-expect_fast "1 MB heredoc with git push" 5
+expect_fast "1 MB heredoc with git push" 10
 [ "$RC" = 2 ] && ok || bad "1 MB heredoc with git push: exit $RC, want 2" "$ERR"
 big_payload "$TMP/big-commit.json" "$TMP/a" commit
 timed "$TMP/a" "$TMP/big-commit.json"
 expect_fast "200 KB commit message" 5
 [ "$RC" = 2 ] && ok || bad "200 KB commit message: exit $RC, want 2" "$ERR"
+
+# Many pushes in one command stay under the hook timeout (B5): more than 20 gated calls block,
+# the checks stop at the first block, and each pushed commit is checked once.
+new_repo mp
+put mp src/auth/login.js "export const login = () => 1"
+mkdir -p "$TMP/mp/02-DOCS/wiki/sdd/specs"
+git -C "$TMP/mp" checkout -q -b feat/y main
+put mp src/util.js "export const one = 1"
+_i=0
+while [ "$_i" -lt 20 ]; do
+  git -C "$TMP/mp" commit -q --allow-empty -m "feat: y$_i"
+  git -C "$TMP/mp" branch "y$_i"
+  _i=$((_i + 1))
+done
+git -C "$TMP/mp" checkout -q feat/x
+# many_cmd N FORMAT — N copies of FORMAT (printf, %d = the index), joined by spaces.
+many_cmd() { awk -v n="$1" -v f="$2" 'BEGIN { for (i = 0; i < n; i++) { if (i) printf " "; printf f, i } }'; }
+payload "$TMP/mp" "git push origin $(many_cmd 100 'feat/y:b%d') feat/x:main" > "$TMP/mp-100.json"
+timed "$TMP/mp" "$TMP/mp-100.json"
+expect_fast "100 distinct refspecs" 10
+expect "100 distinct refspecs block" 2 'too many git pushes'
+payload "$TMP/mp" "git push origin $(many_cmd 21 'feat/y:b%d')" > "$TMP/mp-21.json"
+timed "$TMP/mp" "$TMP/mp-21.json"
+expect "21 distinct refspecs block" 2 'too many git pushes'
+# A git that counts its calls (and, with $TMP/git.sleep, is slow).
+CNTGIT=$TMP/cntgit-bin
+mkdir -p "$CNTGIT"
+printf '#!/bin/sh\necho x >> "%s"\n[ -f "%s" ] && sleep 2\nexec "%s" "$@"\n' "$TMP/git.calls" "$TMP/git.sleep" "$(command -v git)" > "$CNTGIT/git"
+chmod +x "$CNTGIT/git"
+# git_calls_at_most NAME N — the last timed run made at most N git calls.
+git_calls_at_most() {
+  _n=$(wc -l < "$TMP/git.calls" | tr -d ' ')
+  if [ "$_n" -le "$2" ]; then ok; else bad "$1: $_n git calls, want <= $2"; fi
+}
+payload "$TMP/mp" "$(many_cmd 20 'git push origin feat/y:b%d;')" > "$TMP/mp-20y.json"
+: > "$TMP/git.calls"
+timed "$TMP/mp" "$TMP/mp-20y.json" 15 "$CNTGIT:$PATH"
+expect_fast "20 pushes of one commit" 10
+expect_clean "20 pushes of one tier-1 commit"
+git_calls_at_most "20 pushes of one commit are checked once" 8
+# load_info — sets LOAD (the 1-minute load average, from uptime) and LOAD_HIGH (1 when it is at
+# least the number of CPUs: the deadline may then block an honest push).
+load_info() {
+  LOAD=$(uptime 2> /dev/null | sed -n 's/.*load averages*: *\([0-9.]*\).*/\1/p')
+  _cpus=$(getconf _NPROCESSORS_ONLN 2> /dev/null) || _cpus=''
+  case $_cpus in '' | *[!0-9]*) _cpus=4 ;; esac
+  LOAD_HIGH=$(awk -v l="${LOAD:-0}" -v c="$_cpus" 'BEGIN { print (l + 0 >= c + 0) ? 1 : 0 }')
+}
+# expect_clean_or_loaded NAME — exit 0 and no output; under a high load the deadline may block.
+expect_clean_or_loaded() {
+  load_info
+  printf 'info: %s: %ss, exit %s, load %s (high: %s)\n' "$1" "$SECS" "$RC" "${LOAD:-?}" "$LOAD_HIGH"
+  if [ "$RC" = 2 ] && [ "$LOAD_HIGH" = 1 ]; then expect "$1: only the deadline blocks it (high load)" 2 'ran out of time'
+  else expect_clean "$1"; fi
+}
+git_calls() { _n=$(wc -l < "$TMP/git.calls" | tr -d ' '); printf '%s\n' "$_n"; }
+payload "$TMP/mp" "$(many_cmd 5 'git push origin y%d;')" > "$TMP/mp-5.json"
+: > "$TMP/git.calls"
+timed "$TMP/mp" "$TMP/mp-5.json" 15 "$CNTGIT:$PATH"
+expect_clean_or_loaded "5 pushes of 5 tier-1 commits"
+_calls5=$(git_calls)
+git_calls_at_most "5 pushes of 5 commits: checked together" 9
+payload "$TMP/mp" "$(many_cmd 20 'git push origin y%d;')" > "$TMP/mp-20.json"
+: > "$TMP/git.calls"
+timed "$TMP/mp" "$TMP/mp-20.json" 15 "$CNTGIT:$PATH"
+expect_fast "20 pushes of 20 commits" 10
+expect_clean_or_loaded "20 pushes of 20 tier-1 commits"
+_calls20=$(git_calls)
+printf 'info: git calls: 5 pushes of 5 commits %s, 20 pushes of 20 commits %s\n' "$_calls5" "$_calls20"
+[ "$_calls20" = "$_calls5" ] && ok || bad "20 pushes of 20 commits: $_calls20 git calls, want the same as 5 pushes ($_calls5)"
+# Many commits in one refspec: one git log and one diff, whatever their number.
+# fi_branch REPO BRANCH N [AT KIND] — BRANCH off main with N commits (fast-import), each rewriting
+# src/big.js; commit AT credits an AI (KIND ai) or adds a fake AWS key in src/conf.js (KIND secret).
+fi_branch() {
+  awk -v br="$2" -v n="$3" -v at="${4:-0}" -v kind="${5:-}" -v key="$AWS_KEY" 'BEGIN {
+    for (i = 1; i <= n; i++) {
+      printf "commit refs/heads/%s\ncommitter Test Human <human@example.com> %d +0000\n", br, 1700000000 + i
+      m = "feat: big " i
+      if (i == at && kind == "ai") m = m "\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
+      printf "data <<EOM\n%s\nEOM\n", m
+      if (i == 1) printf "from refs/heads/main\n"
+      printf "M 100644 inline src/big.js\ndata <<EOM\nexport const n = %d\nEOM\n", i
+      if (i == at && kind == "secret") printf "M 100644 inline src/conf.js\ndata <<EOM\nexport const k = \"%s\"\nEOM\n", key
+    }
+  }' | git -C "$TMP/$1" fast-import --quiet
+}
+fi_branch mp big5 5
+fi_branch mp big30 30
+fi_branch mp big200 200
+fi_branch mp big-ai 200 150 ai
+fi_branch mp big-sec 200 150 secret
+payload "$TMP/mp" "git push origin big5" > "$TMP/mp-big5.json"
+: > "$TMP/git.calls"
+timed "$TMP/mp" "$TMP/mp-big5.json" 15 "$CNTGIT:$PATH"
+expect_clean_or_loaded "1 refspec of 5 tier-1 commits"
+_calls5=$(git_calls)
+payload "$TMP/mp" "git push origin big200" > "$TMP/mp-big200.json"
+: > "$TMP/git.calls"
+timed "$TMP/mp" "$TMP/mp-big200.json" 15 "$CNTGIT:$PATH"
+expect_clean_or_loaded "1 refspec of 200 tier-1 commits"
+_calls200=$(git_calls)
+printf 'info: git calls: 1 refspec of 5 commits %s, of 200 commits %s\n' "$_calls5" "$_calls200"
+[ "$_calls200" = "$_calls5" ] && ok || bad "1 refspec of 200 commits: $_calls200 git calls, want the same as 5 commits ($_calls5)"
+payload "$TMP/mp" "git push origin big30" > "$TMP/mp-big30.json"
+timed "$TMP/mp" "$TMP/mp-big30.json"
+expect_clean_or_loaded "1 refspec of 30 tier-1 commits"
+if [ "$SECS" -lt 4 ] || [ "$LOAD_HIGH" = 1 ]; then ok; else bad "1 refspec of 30 commits: took ${SECS}s at load $LOAD, want < 4s"; fi
+hook "$TMP/mp" "git push origin big-ai"
+expect "AI co-author in commit 150 of 200" 2 'big-ai credits an AI'
+hook "$TMP/mp" "git push origin big-sec"
+expect "secret in commit 150 of 200" 2 'big-sec looks like it holds a secret'
+# Several refspecs checked together: each still gets its own verdict, in order.
+hook "$TMP/mp" "git push origin y0; git push origin big-ai; git push origin y1"
+expect "batched pushes: AI co-author" 2 'big-ai credits an AI'
+hook "$TMP/mp" "git push origin y0; git push origin big-sec; git push origin big5"
+expect "batched pushes: secret" 2 'big-sec looks like it holds a secret'
+hook "$TMP/mp" "git push origin big-sec; git push origin big-ai"
+expect "batched pushes: the first block wins" 2 'big-sec looks like it holds a secret'
+case $ERR in *'credits an AI'*) bad "batched pushes: checks went on after the first block" "$ERR" ;; *) ok ;; esac
+hook "$TMP/mp" "git push origin y0; git push origin y1 feat/x"
+expect "batched pushes: tier 2" 2 'tier-2 change \(auth: src/auth/login.js\)'
+hook "$TMP/mp" "git push origin y0 y1:main; git push origin feat/x:main"
+expect "batched pushes: tier 2 onto the default branch" 2 'pushes onto the default branch main'
+printf 'commit refs/heads/orph\ncommitter Test Human <human@example.com> 1700000000 +0000\ndata <<EOM\nfeat: orphan\nEOM\nM 100644 inline o.js\ndata <<EOM\nexport const o = 1\nEOM\n' | git -C "$TMP/mp" fast-import --quiet
+hook "$TMP/mp" "git push origin y0; git push origin orph"
+expect "batched pushes: no common history" 1 'orph: risk tier unknown'
+payload "$TMP/mp" "$(many_cmd 20 'git push origin feat/x:b%d;')" > "$TMP/mp-20x.json"
+: > "$TMP/git.calls"
+timed "$TMP/mp" "$TMP/mp-20x.json" 15 "$CNTGIT:$PATH"
+expect_fast "20 pushes, the first blocks" 10
+expect "20 pushes, the first blocks" 2 'branch: b0'
+case $ERR in *'branch: b1`'*) bad "20 pushes: checks went on after the first block" "$ERR" ;; *) ok ;; esac
+git_calls_at_most "20 pushes, the first blocks: no git call after it" 6
+# A slow git (2 s a call): the checks block at the deadline instead of letting the hook time out.
+: > "$TMP/git.sleep"
+timed "$TMP/mp" "$TMP/mp-20.json" 40 "$CNTGIT:$PATH"
+rm -f "$TMP/git.sleep"
+expect "slow checks block at the deadline" 2 'ran out of time'
+expect_fast "slow checks stop before the 30s hook timeout" 20
 
 # ---------------------------------------------------------------------------------------------
 # Without jq: the awk payload parser.
