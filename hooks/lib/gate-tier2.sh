@@ -1,9 +1,12 @@
-# hooks/lib/gate-tier2.sh — the tier-2 gates (git push, gh pr create, gh pr merge, git merge into
-# the default branch) and the decision-queue gate (gh pr merge). Sourced by pre-bash after
-# rsc_context, so RSC_TOP, RSC_BRANCH, RSC_DEFAULT_*, RSC_ROOT and the RSC_HAS_* flags are set.
+# hooks/lib/gate-tier2.sh — the push gates (every git push refspec: authorship, secrets, and the
+# tier-2 spec + panel gate, or the merge gate when it lands on the default branch), the tier-2
+# gates of gh pr create, gh pr merge and git merge into the default branch, and the decision-queue
+# gate (gh pr merge). Sourced by pre-bash after rsc_context, so RSC_TOP, RSC_BRANCH,
+# RSC_DEFAULT_*, RSC_ROOT and the RSC_HAS_* flags are set.
 #
-# All of them apply only inside an SDD workspace (02-DOCS found by rsc_sdd_root); without one
-# they allow. The tier is risk-tier's, on the committed diff (what leaves the machine).
+# The tier gates apply only inside an SDD workspace (02-DOCS found by rsc_sdd_root); without one
+# they allow. The tier is risk-tier's, on the committed diff of what is pushed (the source of each
+# refspec, not HEAD) against the default branch: what leaves the machine.
 #
 # Errors: when the tier cannot be computed (no default branch, no common history) the gates allow
 # with a note, as every check does. Once the tier IS 2, blocking is the documented safe default
@@ -54,9 +57,20 @@ rsc_specs_for() {
 }
 
 # rsc_has_panel FILE — FILE has the panel record line of without-rsc-cli.md §3:
-# `<task>: panel correctness, security, tests` (optionally as a list item).
+# `<task>: panel correctness, security, tests` (optionally as a list item), outside code fences.
 rsc_has_panel() {
-  [ -f "$1" ] && grep -qE "^[[:space:]]*([-*][[:space:]]+)?[^[:space:]:]+: $PANEL_LINE[[:space:]]*\$" "$1"
+  [ -f "$1" ] && awk -v want="$PANEL_LINE" '
+    /^[ \t]*(```|~~~)/ { fence = !fence; next }
+    fence { next }
+    {
+      l = $0
+      sub(/^[ \t]*([-*][ \t]+)?/, "", l)
+      sub(/[ \t]+$/, "", l)
+      i = index(l, ": ")
+      if (i > 1 && substr(l, 1, i - 1) !~ /[ \t:]/ && substr(l, i + 2) == want) { found = 1; exit }
+    }
+    END { exit !found }
+  ' "$1"
 }
 
 # rsc_target_branch DIR TARGET — TARGET when it names a local branch, else the current branch.
@@ -68,21 +82,27 @@ rsc_target_branch() {
   fi
 }
 
-# gate_spec_panel WHAT — tier-2 push / PR gate.
+# gate_spec_panel WHAT SRC BRANCH [ALT] — tier-2 push / PR gate for the commits of SRC, which the
+# forge sees as branch BRANCH (empty: detached HEAD). The spec is the one linked to BRANCH, else
+# to ALT (the local branch name of SRC).
 gate_spec_panel() {
   [ "$RSC_HAS_ROOT" = 1 ] || return 0
+  _sp_what=$1 _sp_src=${2:-HEAD} _sp_name=$3 _sp_alt=${4:-}
   if [ "$RSC_HAS_DEFAULT" != 1 ]; then
-    note "$1: no default branch (origin/HEAD, main or master); the tier-2 spec and panel gate did not run"
+    note "$_sp_what: no default branch (origin/HEAD, main or master); the tier-2 spec and panel gate did not run"
     return 0
   fi
-  if ! rsc_tier "$RSC_DEFAULT_REF" HEAD; then
-    note "$1: risk tier unknown ($RSC_TIER_ERR); the tier-2 spec and panel gate did not run"
+  if ! rsc_tier "$RSC_DEFAULT_REF" "$_sp_src"; then
+    note "$_sp_what: risk tier unknown ($RSC_TIER_ERR); the tier-2 spec and panel gate did not run"
     return 0
   fi
   [ "$RSC_TIER" = 2 ] || return 0
-  _sp_specs=$(rsc_specs_for "$RSC_BRANCH")
+  _sp_specs=$(rsc_specs_for "$_sp_name")
+  if [ -z "$_sp_specs" ] && [ -n "$_sp_alt" ] && [ "$_sp_alt" != "$_sp_name" ]; then
+    _sp_specs=$(rsc_specs_for "$_sp_alt")
+  fi
   if [ -z "$_sp_specs" ]; then
-    block "$1: tier-2 change ($RSC_TIER_WHY) and no spec in 02-DOCS/wiki/sdd/specs/ has \`branch: ${RSC_BRANCH:-<detached HEAD>}\` in its frontmatter. Write and approve the spec (specify), add that line, record the three-lens panel, then retry."
+    block "$_sp_what: tier-2 change ($RSC_TIER_WHY) and no spec in 02-DOCS/wiki/sdd/specs/ has \`branch: ${_sp_name:-<detached HEAD>}\` in its frontmatter. Write and approve the spec (specify), add that line, record the three-lens panel, then retry."
     return 0
   fi
   _sp_missing=''
@@ -99,7 +119,117 @@ gate_spec_panel() {
   done << EOF
 $_sp_specs
 EOF
-  block "$1: tier-2 change ($RSC_TIER_WHY) on branch ${RSC_BRANCH:-<detached HEAD>} is not ready${_sp_missing}."
+  block "$_sp_what: tier-2 change ($RSC_TIER_WHY) on branch ${_sp_name:-<detached HEAD>} is not ready${_sp_missing}."
+}
+
+# gate_push DIR SRC DST [LABEL] — one pushed refspec (parse-command.awk's push line): authorship
+# and secrets of the commits SRC adds to the default branch, then the merge gate when DST is the
+# default branch (pushing onto it is a merge), else the tier-2 spec + panel gate for branch DST.
+gate_push() {
+  _gp_src=$2 _gp_dst=$3 _gp_what=${4:-}
+  case $_gp_src in '' | -*) return 0 ;; @) _gp_src=HEAD ;; esac
+  case $_gp_dst in -*) return 0 ;; esac
+  if [ -z "$_gp_what" ]; then
+    if [ "$_gp_dst" = @push ]; then _gp_what="git push"; else _gp_what="git push $_gp_src${_gp_dst:+:$_gp_dst}"; fi
+  fi
+  case $_gp_src in
+    HEAD) _gp_sname=$RSC_BRANCH ;;
+    refs/heads/*) _gp_sname=${_gp_src#refs/heads/} ;;
+    *)
+      _gp_sname=''
+      git -C "$RSC_TOP" rev-parse -q --verify "refs/heads/$_gp_src" > /dev/null 2>&1 && _gp_sname=$_gp_src
+      ;;
+  esac
+  case $_gp_dst in
+    @push)
+      # Where a plain `git push` goes (push.default, the upstream), else the current branch.
+      _gp_dst=$(git -C "$RSC_TOP" rev-parse --abbrev-ref --symbolic-full-name '@{push}' 2> /dev/null) || _gp_dst=''
+      case $_gp_dst in */*) _gp_dst=${_gp_dst#*/} ;; *) _gp_dst=$RSC_BRANCH ;; esac
+      ;;
+    '')
+      case $_gp_src in
+        HEAD) _gp_dst=$RSC_BRANCH ;;
+        *) _gp_dst=${_gp_sname:-$_gp_src} ;;
+      esac
+      ;;
+  esac
+  _gp_dst=${_gp_dst#refs/heads/}
+  # A source git cannot resolve: git push itself refuses it. (HEAD: rsc_repo found the work tree;
+  # an unborn HEAD makes the tier unknown, which is noted.)
+  if [ "$_gp_src" != HEAD ]; then
+    git -C "$RSC_TOP" rev-parse -q --verify "$_gp_src^{commit}" > /dev/null 2>&1 || return 0
+  fi
+  gate_authorship_push "$_gp_src" "$_gp_what"
+  gate_secrets_push "$_gp_src" "$_gp_what"
+  if [ "$RSC_HAS_DEFAULT" = 1 ] && [ "$_gp_dst" = "$RSC_DEFAULT_NAME" ]; then
+    gate_push_default "$_gp_what" "$_gp_src"
+  else
+    gate_spec_panel "$_gp_what" "$_gp_src" "$_gp_dst" "$_gp_sname"
+  fi
+}
+
+# gate_push_default WHAT SRC — a push onto the default branch merges SRC into it: at tier 2 the
+# human merges in the forge, as with gh pr merge and git merge.
+gate_push_default() {
+  [ "$RSC_HAS_ROOT" = 1 ] || return 0
+  if ! rsc_tier "$RSC_DEFAULT_REF" "$2"; then
+    note "$1: risk tier unknown ($RSC_TIER_ERR); the tier-2 merge gate did not run"
+    return 0
+  fi
+  [ "$RSC_TIER" = 2 ] || return 0
+  block "$1: pushes onto the default branch $RSC_DEFAULT_NAME, which merges it: tier-2 change ($RSC_TIER_WHY). The human merges this in the forge, after approving it; an agent never merges tier 2 (ship skill)."
+}
+
+# gate_push_all DIR — git push --all / --branches / --mirror / a glob refspec: every local branch
+# that differs from origin's copy is judged as \`git push origin B:B\`. Over 20 such branches the
+# push is blocked: the checks would not fit in the hook's time, so the branches go one by one.
+gate_push_all() {
+  _pa_refs=$(git -C "$RSC_TOP" for-each-ref --format='%(refname) %(objectname)' refs/heads refs/remotes/origin 2> /dev/null) || {
+    note "git push --all: cannot list the branches; nothing checked"
+    return 0
+  }
+  _pa_remote=' '
+  while read -r _pa_ref _pa_oid; do
+    case $_pa_ref in refs/remotes/origin/*) _pa_remote="$_pa_remote${_pa_ref#refs/remotes/origin/}=$_pa_oid " ;; esac
+  done << EOF
+$_pa_refs
+EOF
+  _pa_list=''
+  _pa_n=0
+  while read -r _pa_ref _pa_oid; do
+    case $_pa_ref in refs/heads/*) ;; *) continue ;; esac
+    _pa_b=${_pa_ref#refs/heads/}
+    case $_pa_remote in *" $_pa_b=$_pa_oid "*) continue ;; esac
+    _pa_n=$((_pa_n + 1))
+    _pa_list="$_pa_list$_pa_b
+"
+  done << EOF
+$_pa_refs
+EOF
+  if [ "$_pa_n" -gt 20 ]; then
+    block "git push --all: $_pa_n local branches differ from origin; push them one at a time by name (git push origin <branch>) so each can be checked."
+    return 0
+  fi
+  while IFS= read -r _pa_b; do
+    [ -n "$_pa_b" ] || continue
+    gate_push "$1" "refs/heads/$_pa_b" "$_pa_b" "git push --all ($_pa_b)"
+  done << EOF
+$_pa_list
+EOF
+}
+
+# gate_pr_create DIR HEAD — gh pr create [--head HEAD]: the spec + panel gate on that branch.
+gate_pr_create() {
+  if [ -z "$2" ]; then
+    gate_spec_panel "gh pr create" HEAD "$RSC_BRANCH"
+  elif git -C "$RSC_TOP" rev-parse -q --verify "refs/heads/$2" > /dev/null 2>&1; then
+    gate_spec_panel "gh pr create --head $2" "refs/heads/$2" "$2"
+  elif git -C "$RSC_TOP" rev-parse -q --verify "refs/remotes/origin/$2" > /dev/null 2>&1; then
+    gate_spec_panel "gh pr create --head $2" "refs/remotes/origin/$2" "$2"
+  else
+    [ "$RSC_HAS_ROOT" = 1 ] && note "gh pr create --head $2: no such branch here; the tier-2 spec and panel gate did not run"
+  fi
+  return 0
 }
 
 # gate_pr_merge DIR TARGET — `gh pr merge` at tier 2: never by an agent.
@@ -154,7 +284,7 @@ gate_queue() {
     [ -f "$_dq_pf" ] || continue
     _dq_items=$(awk '
       /^##?[ \t]/ { inq = (tolower($0) ~ /^##[ \t]+decision queue[ \t]*$/); next }
-      inq && /^[ \t]*- \[blocking\]/ { sub(/^[ \t]*- /, ""); n++; if (n <= 5) out = out (n > 1 ? "; " : "") $0 }
+      inq && tolower($0) ~ /^[ \t]*[-*+][ \t]+\[blocking\]/ { sub(/^[ \t]*[-*+][ \t]+/, ""); n++; if (n <= 5) out = out (n > 1 ? "; " : "") $0 }
       END { if (n) { print out (n > 5 ? "; ..." : ""); exit 3 } }
     ' "$_dq_pf") && continue
     _dq_found="$_dq_found; progress/$_dq_slug.md: $_dq_items"

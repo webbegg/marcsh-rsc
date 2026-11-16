@@ -4,10 +4,12 @@
 # Reads the hook payload (JSON) on stdin, finds the git/gh calls in tool_input.command and runs
 # the gates for them (hooks/lib/):
 #   git push, gh pr create   tier-2 spec + panel gate              (gate-tier2.sh, needs 02-DOCS)
+#   git push onto default    tier-2 merge gate                     (gate-tier2.sh, needs 02-DOCS)
 #   gh pr merge              tier-2 merge gate, decision queue     (gate-tier2.sh, needs 02-DOCS)
 #   git merge into default   tier-2 merge gate                     (gate-tier2.sh, needs 02-DOCS)
 #   git commit, git push     authorship gate, secrets gate         (gate-authorship.sh, gate-secrets.sh)
-# Every other command passes untouched (exit 0, no output).
+# A push is judged per refspec, on what it pushes (its source ref), not on HEAD. Every other
+# command passes untouched (exit 0, no output).
 #
 # Exit 2 blocks the call; the reasons go to stderr, where the model reads them. Exit 1 (a note on
 # stderr) never blocks: it reports a check that could not run. An unreadable payload or command
@@ -64,6 +66,11 @@ case $? in
 esac
 [ -n "$ACTIONS" ] || exit 0
 
+if ! command -v git > /dev/null 2>&1; then
+  note "git is not on PATH; the git and gh calls in this command were not checked"
+  finish
+fi
+
 . "$LIB/git.sh"
 . "$LIB/risk-tier.sh"
 . "$LIB/gate-authorship.sh"
@@ -72,6 +79,10 @@ esac
 
 while IFS=$TAB read -r _kind _dir _a _b; do
   [ -n "$_kind" ] || continue
+  if [ "$_kind" = note ]; then
+    note "$_a"
+    continue
+  fi
   # Not in a work tree (or a path the reader could not resolve, like $VAR): git itself refuses.
   rsc_context "$_dir" || continue
   case $_kind in
@@ -83,12 +94,13 @@ while IFS=$TAB read -r _kind _dir _a _b; do
       block "git commit: the message credits an AI ($_a). Commits ship under the responsible person's name only (ship skill, the hard rule); remove that line and commit again."
       ;;
     push)
-      gate_authorship_push
-      gate_secrets_push
-      gate_spec_panel "git push"
+      gate_push "$_dir" "$_a" "$_b"
+      ;;
+    push-all)
+      gate_push_all "$_dir"
       ;;
     pr-create)
-      gate_spec_panel "gh pr create"
+      gate_pr_create "$_dir" "$_a"
       ;;
     pr-merge)
       gate_pr_merge "$_dir" "$_a"

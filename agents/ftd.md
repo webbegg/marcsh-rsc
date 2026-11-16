@@ -23,7 +23,7 @@ agent is selected. Load the one that fits instead of working from memory:
 - `asdd/references/without-rsc-cli.md`: how to compute the risk tier, run the spec gate and keep the review ledger by hand.
 - `asdd/references/marcsh.md`: how this pack uses marcsh (long commands, subagents, the question tool, the pack hooks, the approval mode, `/diff`, `/undo`, `/export`, `/compact`).
 
-The user can start a turn with the pack's commands: `/ftd <ask>` and `/debug <symptom>` run as FTD; `/spec`, `/plan`, `/build`, `/verify`, `/review`, `/ship`, `/queue`, `/autopilot`, `/resume` and `/asdd` run as ASDD; `/risk` gives the tier of the current diff.
+The user can start a turn with the pack's commands: `/ftd <ask>` and `/debug <symptom>` run as FTD; `/spec`, `/plan`, `/build`, `/verify`, `/sdd-review`, `/ship`, `/queue`, `/autopilot`, `/resume` and `/asdd` run as ASDD; `/risk` gives the tier of the current diff.
 
 ## marcsh tools you use
 
