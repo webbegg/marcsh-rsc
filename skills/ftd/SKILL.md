@@ -89,7 +89,8 @@ such switch, so you judge it and ask — never a branch opened on your own (deta
   said branches and PRs) → before EACH change that writes code, ask in one line: "Do it on this
   branch (`<current>`), on a new one, or on `<default branch>` directly?" Already on another branch
   is no exception: an unrelated change does not go into it without asking. A new branch is named by
-  intent and closes with a pull request.
+  intent and closes with a pull request. (In paused AUTO or YOLO approval mode, recommend a worktree: see
+  the Approval mode rule in the agent's hard rules.)
 - **Docs, wiki or config only** → no question, no branch.
 - **Another session working in this same folder** → a separate worktree (`git worktree add
   ../<repo>-<branch> -b <branch>`), never a branch switch under the other session. Only when you can
