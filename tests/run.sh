@@ -740,10 +740,10 @@ many_cmd() { awk -v n="$1" -v f="$2" 'BEGIN { for (i = 0; i < n; i++) { if (i) p
 payload "$TMP/mp" "git push origin $(many_cmd 100 'feat/y:b%d') feat/x:main" > "$TMP/mp-100.json"
 timed "$TMP/mp" "$TMP/mp-100.json"
 expect_fast "100 distinct refspecs" 10
-expect "100 distinct refspecs block" 2 'too many git pushes'
+expect "100 distinct refspecs block" 2 'too many gated git/gh calls in one command'
 payload "$TMP/mp" "git push origin $(many_cmd 21 'feat/y:b%d')" > "$TMP/mp-21.json"
 timed "$TMP/mp" "$TMP/mp-21.json"
-expect "21 distinct refspecs block" 2 'too many git pushes'
+expect "21 distinct refspecs block" 2 'too many gated git/gh calls in one command'
 # A git that counts its calls (and, with $TMP/git.sleep, is slow).
 CNTGIT=$TMP/cntgit-bin
 mkdir -p "$CNTGIT"
@@ -843,6 +843,24 @@ hook "$TMP/mp" "git push origin y0; git push origin y1 feat/x"
 expect "batched pushes: tier 2" 2 'tier-2 change \(auth: src/auth/login.js\)'
 hook "$TMP/mp" "git push origin y0 y1:main; git push origin feat/x:main"
 expect "batched pushes: tier 2 onto the default branch" 2 'pushes onto the default branch main'
+# A source rev-parse expands to several lines (a range, a symmetric difference, ^!) never shifts
+# the commits of the other sources: it is checked on its own, as without the batch.
+hook "$TMP/mp" "git push origin y0...y1 big-sec"
+expect "batched pushes: X...Y then a secret" 2 'big-sec looks like it holds a secret'
+hook "$TMP/mp" "git push origin y1...y0 big-sec"
+expect "batched pushes: Y...X then a secret" 2 'big-sec looks like it holds a secret'
+hook "$TMP/mp" "git push origin y0...y1:refs/heads/z big-sec:refs/heads/w"
+expect "batched pushes: X...Y:z then a secret to w" 2 'big-sec:refs/heads/w: .*looks like it holds a secret'
+hook "$TMP/mp" "git push origin y0...y1 big-ai"
+expect "batched pushes: X...Y then an AI co-author" 2 'big-ai credits an AI'
+hook "$TMP/mp" "git push origin y0...y1 big-sec:main"
+expect "batched pushes: X...Y then a secret onto main" 2 'big-sec:main: .*looks like it holds a secret'
+hook "$TMP/mp" "git push origin y0..y1 big-sec"
+expect "batched pushes: X..Y then a secret" 2 'big-sec looks like it holds a secret'
+hook "$TMP/mp" "git push origin y1^! big-sec"
+expect "batched pushes: X^! then a secret" 2 'big-sec looks like it holds a secret'
+hook "$TMP/mp" "git push origin y1@{0}...y0 y2 big-sec y3"
+expect "batched pushes: X@{0}...Y among single commits, then a secret" 2 'big-sec looks like it holds a secret'
 printf 'commit refs/heads/orph\ncommitter Test Human <human@example.com> 1700000000 +0000\ndata <<EOM\nfeat: orphan\nEOM\nM 100644 inline o.js\ndata <<EOM\nexport const o = 1\nEOM\n' | git -C "$TMP/mp" fast-import --quiet
 hook "$TMP/mp" "git push origin y0; git push origin orph"
 expect "batched pushes: no common history" 1 'orph: risk tier unknown'
@@ -922,6 +940,31 @@ _w1b=$(cd "$TMP/w1/sub" && "$TSH" "$WORKSPACE")
 case $_w1 in "$TMPDIR"/rsc-sdd-scratch-*) ok ;; *) bad "sdd-workspace: fallback under TMPDIR with a project suffix" "$_w1" ;; esac
 [ "$_w1" != "$_w2" ] && ok || bad "sdd-workspace: two projects get two dirs" "$_w1 / $_w2"
 [ "$_w1" = "$_w1b" ] && ok || bad "sdd-workspace: same project, same dir" "$_w1 / $_w1b"
+# mode_of DIR — the permission string of DIR (drwx------).
+mode_of() { ls -ld "$1" 2> /dev/null | cut -c1-10; }
+[ "$(mode_of "$_w1")" = drwx------ ] && [ -O "$_w1" ] && ok || bad "sdd-workspace: fallback dir is the user's own, mode 0700" "$(ls -ld "$_w1")"
+# A fallback path someone else prepared (a symlink, a dir open to others) is never used.
+rm -rf "$_w2"
+mkdir -p "$TMP/evil"
+ln -s "$TMP/evil" "$_w2"
+_w2s=$(cd "$TMP/w2" && "$TSH" "$WORKSPACE" 2> /dev/null)
+if [ -n "$_w2s" ] && [ "$_w2s" != "$_w2" ] && [ -d "$_w2s" ] && [ ! -L "$_w2s" ] && [ -z "$(ls -A "$TMP/evil")" ]; then ok; else bad "sdd-workspace: a symlink at the fallback path is not used" "$_w2s / $(ls -A "$TMP/evil")"; fi
+rm -f "$_w2"
+mkdir -m 777 "$_w2"
+_w2u=$(cd "$TMP/w2" && "$TSH" "$WORKSPACE" 2> /dev/null)
+if [ -n "$_w2u" ] && [ "$_w2u" != "$_w2" ] && [ ! -e "$_w2/.gitignore" ]; then ok; else bad "sdd-workspace: a fallback dir open to others is not used" "$_w2u"; fi
+# 02-DOCS is looked for up to the git root, never above it.
+mkdir -p "$TMP/up/02-DOCS"
+git init -q "$TMP/up/repo"
+mkdir -p "$TMP/up/repo/sub"
+_upl=$(cd "$TMP/up" && pwd)
+_up=$(cd "$TMP/up" && pwd -P)
+_wu=$(cd "$TMP/up/repo/sub" && "$TSH" "$WORKSPACE")
+case $_wu in "$_upl/02-DOCS"* | "$_up/02-DOCS"*) bad "sdd-workspace: a 02-DOCS above the git root is not used" "$_wu" ;; *) ok ;; esac
+[ ! -e "$TMP/up/02-DOCS/wiki" ] && ok || bad "sdd-workspace: nothing written above the git root" "$(find "$TMP/up/02-DOCS")"
+mkdir -p "$TMP/up/repo/02-DOCS"
+_wr=$(cd "$TMP/up/repo/sub" && "$TSH" "$WORKSPACE")
+{ [ "$_wr" = "$_upl/repo/02-DOCS/wiki/sdd/.scratch" ] || [ "$_wr" = "$_up/repo/02-DOCS/wiki/sdd/.scratch" ]; } && [ -f "$_wr/.gitignore" ] && ok || bad "sdd-workspace: the repository's 02-DOCS is found from a subfolder" "$_wr"
 
 # ---------------------------------------------------------------------------------------------
 printf '%s: %d passed, %d failed\n' "$TSH" "$PASSES" "$FAILS"

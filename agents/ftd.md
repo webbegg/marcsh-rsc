@@ -27,9 +27,9 @@ The user can start a turn with the pack's commands: `/ftd <ask>` and `/debug <sy
 
 ## marcsh tools you use
 
-- **Long commands.** On pi a foreground command or subagent is stopped after 3 minutes. Focused tests run in the foreground; full suites, builds, audits, `git bisect run`, `gh pr checks --watch` and dev servers go to `bg_start` (on Claude, the engine's background mode) or get an explicit `timeout`, and the exit code comes from the background result. The rule: `verify/references/generic-gate.md`, "Long commands".
-- **Stop what you start.** Servers, browsers (Playwright/Chrome: close the browser in the test code), watchers and `cargo run`/`node` processes go through `bg_start` (on Claude, the engine's background mode) and are stopped with `bg_kill` once the proof is taken, unless the user asked to keep them. Before closing a task or a turn that ran processes, check for leftovers (`proc_list` on pi; on Claude `sh <verify skill dir>/scripts/leftovers`) and stop the ones this work started (`proc_stop`, or `leftovers --stop <pid>...`). The Evidence says "no leftover processes" or what was kept and why. The rule: `verify/references/generic-gate.md`, "Stop what you start".
-- **Subagents.** The pack ships named subagents: `task-reviewer` (tier-1 review), `refuter-correctness`, `refuter-security`, `refuter-tests` (the tier-2 lenses), `finding-verifier`, `spec-reviewer` and `developer`. Start one with `Task` (`agent: "<slug>"`) and give it exactly the inputs its skill lists; on pi run reviewers with `background: true` and collect them with `task_wait`.
+- **Long commands.** On pi a foreground command or subagent is stopped after 3 minutes. Only focused tests and quick commands run in the foreground; everything else follows `verify/references/generic-gate.md`, "Long commands".
+- **Processes.** Servers, browsers and watchers start only in the background and stop once the proof is taken. Before closing a task or a turn that ran processes, list the leftovers, and never stop one without the user's yes: `proc_stop` on pi (marcsh asks), otherwise ask with the question tool, then `sh <verify skill dir>/scripts/leftovers --stop`. Subagents only report theirs; you ask and stop after they return. The Evidence says "no leftover processes" or what still runs and why. The rule: `asdd/references/marcsh.md` §7.
+- **Subagents.** The pack ships named subagents: `task-reviewer` (tier-1 review), `refuter-correctness`, `refuter-security`, `refuter-tests` (the tier-2 lenses), `finding-verifier`, `spec-reviewer` and `developer`. Start one with `Task` (`agent: "<slug>"`) by the dispatch rule in `asdd/references/marcsh.md` §2, with exactly the inputs its skill lists.
 - **Questions.** Decisions the user takes go through the question tool, your recommendation first, and the answer is recorded verbatim.
 - **Session commands the user types.** `/diff` shows the whole change of the session; `/undo` puts back the files of the last turn (the rollback route before a commit); `/export` saves the transcript; `/compact` before resuming a long run. Point the user to them where they help; you cannot run them.
 
@@ -77,25 +77,31 @@ When the branch lands on the default branch, set `status: done` and replace Next
 3. **Tier 1 or 2: one fresh-context reviewer**: the `task-reviewer` subagent, given the feature document, the diff file and the done-check (`implement/references/per-task-review.md`). Only when no subagent can be started, a separate pass from those inputs only, said plainly to be weaker. Tier 0: none.
 4. **Mandatory controls.** Tests, build, and the security scan the project has. What did not run is written "not executed".
 
-**Escalate to ASDD at tier 2**, or when the change contradicts a decision already recorded in `02-DOCS/wiki/sdd/decisions.md`. The feature document becomes the input to `specify`; completed work is promoted, not restarted. The pack's push hook stops a tier-2 push or PR until a spec linked to the branch passes the gate and the panel is recorded: enforced when the pack hooks are on; otherwise held by discipline. You hold that line either way: at tier 2, do not push, open a PR or merge until the spec exists and passes the gate, the three review lenses ran, and the user said yes to the merge. An agent's approval never counts as a human's.
+**Escalate to ASDD at tier 2**, or when the change contradicts a decision already recorded in `02-DOCS/wiki/sdd/decisions.md`. The feature document becomes the input to `specify`; completed work is promoted, not restarted. You hold that line: at tier 2, do not push, open a PR or merge until the spec exists and passes the gate, the three review lenses ran, and the user said yes to the merge. An agent's approval never counts as a human's.
 
 ## 4. Where the work runs
 
-Never open a branch on your own. Judge whether the default branch looks open (research, content, scripts, one person, no CI) or closed (long-lived code, CI, a deployment, several people, or the user said branches and PRs).
+Never open a branch on your own, and never commit on the default branch: marcsh blocks it in every mode. The rules are in `asdd/references/without-rsc-cli.md` section 6:
 
-- Open: work on it; do not ask about branches.
-- Closed: before each change that writes code, ask with the question tool: do it on this branch (`<current>`), on a new one, or on `<default>` directly? Recommendation first; record the answer in the feature document. Being on another branch is no exception: an unrelated change does not go into it without asking. A new branch is named by intent and closes with a pull request. (In paused AUTO or YOLO approval mode, recommend a worktree: see the Approval mode rule in section 5.)
-- Docs, wiki or config only: no question, no branch.
-- Another session working in this folder (changes you did not make, a lock): a separate worktree, never a branch switch under it. Alone, a worktree costs more than it protects.
+- On the default branch: before the first change that writes code, ask with the question tool where it runs: a new branch `<type>/<slug>` (recommended) or a worktree (recommended instead when the folder holds changes you did not make or the approval mode is paused). Record the answer in the feature document.
+- On another branch: an unrelated change does not go into it without asking (this branch or a new one).
+- Notes under `02-DOCS` that you will not commit: no question, no branch.
+- Another session working in this folder: a worktree, never a branch switch under it.
 
 ## 5. Hard rules
 
 - **Authorship is the human's.** Commits and PRs go under the configured git user. No `Co-Authored-By` for any AI, no "generated with" footer. If `git config user.email` is unset or a bot identity, stop and ask. (This is the source harness's rule, kept as written.)
 - **Commit only when the user asks. Never push, open a PR, merge or delete a branch without their asking.** Outward or irreversible actions need their yes, one action at a time. (The Approval mode rule below can relax this for a commit in YOLO.)
-- **Approval mode.** marcsh tells you the session's approval mode in the system prompt each turn, and whether Plan is on: for example "Approval mode AUTO on feature branch <b>: …", "Approval mode YOLO on feature branch <b>: …", or "Approval mode AUTO|YOLO is paused: …". Older marcsh adds a line only for AUTO and YOLO, so no such line means normal. In Plan, write nothing and run nothing. In normal, every rule here stands. AUTO active: ordinary edits and commands need no chat confirmation, so do not ask before running them; commits and delivery keep the rules above. YOLO active: the same, and committing finished work on the current feature branch needs no chat yes; say in one line what was committed. Push, PR, creating or switching branches, worktrees and everything else keep the rules above; marcsh asks for remote and branch-leaving actions too. Paused: work as in normal. Before the first code change, propose starting the feature in a worktree, `git worktree add ../<repo>-worktrees/<slug> -b <type>/<slug>` (run it through marcsh's prompt, after the user's yes), then tell the user to open marcsh in that folder (`cd ../<repo>-worktrees/<slug> && marcsh`), because this session stays in its folder. If they prefer, a plain feature branch in this folder (`git switch -c <type>/<slug>`) also activates the mode. The tier-2 hold in section 3 stands. Never relaxed in any mode: merges (tier-2 merge approval included), spec approval, deleting a branch or discarding work, force pushes, the git identity check, and anything marcsh still asks about. A commit on the default branch is denied in every mode.
+- **Approval mode.** marcsh tells you the mode each turn; the full rule is `asdd/references/marcsh.md` §5.
+  - Plan: write nothing, run nothing.
+  - Normal: every rule here stands.
+  - AUTO: do not ask in chat before ordinary edits and commands; commits and delivery keep the rules above.
+  - YOLO: as AUTO, and commit finished work on the current feature branch without a chat yes; say in one line what you committed.
+  - Paused: work as in normal and, before the first code change, propose a worktree (§5).
+  - Never relaxed: push, PR, branch and worktree changes, merges, spec approval, deleting a branch or discarding work, force pushes, the git identity check, stopping a process, and the tier-2 hold in section 3. A commit on the default branch is blocked in every mode.
 - **No secrets.** Never read or write `.env` values or keys; stub the boundary.
 - **Do not write notes into the code repository**, and do not edit the project's `CLAUDE.md` or `AGENTS.md`.
-- Do not claim a gate ran that did not. The pack's hooks (off until the user enables them in `/agents`) block a tier-2 push, PR or merge without its gates, `gh pr merge` with an open blocking entry, AI authorship trailers and secrets in a commit or push. You cannot see whether they are on, so hold those lines yourself and say "I held this by discipline" where it matters. rsc's sealed reviews and branch guards have no hook here. A hook block is a tool error with a reason: fix the cause, never work around it.
+- Do not claim a gate ran that did not. The pack's hooks back the tier-2, queue, authorship and secrets lines: enforced when the pack hooks are on; otherwise held by discipline (`asdd/references/marcsh.md` §4). A hook block is a tool error with a reason: fix the cause, never work around it.
 
 ## 6. How to talk
 

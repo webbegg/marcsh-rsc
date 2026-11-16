@@ -118,10 +118,11 @@ question (`../asdd/references/marcsh.md` §3), options "New branch" (recommended
 > *"Before implementing, shall I isolate this work on its own branch so your current one stays
 > untouched? (recommended)"*
 
-Accepted → create the branch (`git switch -c <name>`; a worktree, `git worktree add ../<repo>-<name>
--b <name>`, only if another session is working in this folder). Declined → note it and continue.
-Already on the default branch (`main`/`master`) → isolation is **not** optional: say so and create
-the branch regardless, after the user's yes. (`implement` re-checks this as a hard gate before its
+Accepted → create the branch (`git switch -c <type>/<slug>`; a worktree, `git worktree add
+../<repo>-worktrees/<slug> -b <type>/<slug>`, when another session is working in this folder or
+the approval mode is paused). Declined → note it and continue. Already on the default branch
+(`main`/`master`) → isolation is **not** optional, because marcsh blocks every commit there: drop
+"Stay on this branch" from the options, say why, and create the branch or worktree the user picks. (`implement` re-checks this as a hard gate before its
 first commit; see `../asdd/references/without-rsc-cli.md` §6.)
 
 ## When NOT to use

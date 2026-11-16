@@ -28,10 +28,10 @@ Big, or decisions that affect each other → **ASDD**: enter the chain; the pers
 clarify, then picks manual or autopilot. Say which and why in one line; switch if asked.
 → `../ftd/SKILL.md` · `../asdd/SKILL.md`.
 
-**Where.** Default branch looks open (nothing complex, one person, no CI) → work on it, no branch
-question. Looks closed (CI, a deployment, a team, or the user said branches and PRs) → before each
-code change ask, with the question tool: this branch, a new one, or the default branch? Never branch alone. Another session
-in this folder → a separate worktree. Details: `../asdd/references/without-rsc-cli.md` §6.
+**Where.** marcsh blocks every commit on the default branch. On it, before the first code change,
+ask with the question tool: a new branch (recommended) or a worktree. On another branch, an
+unrelated change asks first: this branch or a new one. Never branch alone. Another session in this
+folder → a separate worktree. Details: `../asdd/references/without-rsc-cli.md` §6.
 
 Judge the **meaning**, not the wording: the trigger is semantic in any language. A bug fix restoring
 intended behaviour is `debug`. Autopilot consent covers a whole run — advance without re-asking.

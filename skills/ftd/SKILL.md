@@ -65,15 +65,13 @@ the chain: a result asserted without evidence is treated as not done.
 
 The lane inherits ASDD's per-task loop, cut to its floor:
 
-1. **Self-check** — run the change's own check and record the output under Evidence. Focused
-   tests run in the foreground; a full suite, build or audit by the long-command rule
+1. **Self-check** — run the change's own check and record the output under Evidence. Only focused
+   tests run in the foreground; everything else by the long-command rule
    (`../verify/references/generic-gate.md`, "Long commands"). Tell the user they can see the whole
    change with `/diff`, and that `/undo` puts back the files of a turn that went wrong before it
-   was committed (`../asdd/references/marcsh.md` §6). Stop what the check started (servers,
-   browsers, watchers, `cargo run`/`node`), check for leftovers (`proc_list` on pi; on Claude
-   `sh scripts/leftovers` from the `verify` skill's folder) and record "no leftover processes" or
-   what was kept and why under Evidence (`../verify/references/generic-gate.md`, "Stop what you
-   start").
+   was committed (`../asdd/references/marcsh.md` §6). Stop what the check started, list the
+   leftovers, never stop one without the user's yes, and record "no leftover processes" or what
+   still runs and why under Evidence (`../asdd/references/marcsh.md` §7).
 2. **Risk tier** — the tier of what changed, from the path table and content signals in
    `../asdd/references/without-rsc-cli.md` §1. State it in one line with the reason.
 3. **Tier ≥ 1 → one fresh-context reviewer**: the `task-reviewer` subagent, with the feature
@@ -89,24 +87,21 @@ already recorded in `decisions.md`: the feature document becomes its spec input,
 
 ## Isolation
 
-rsc records per project whether the default branch is open or closed to the agent. marcsh has no
-such switch, so you judge it and ask — never a branch opened on your own (details in
+marcsh blocks every commit on the default branch, in every approval mode, so code work never runs
+there. You ask where it runs — never a branch opened on your own (details in
 `../asdd/references/without-rsc-cli.md` §6):
 
-- **Default branch looks open** (research, content, scripts, simple projects, no CI, one person) →
-  work straight on it. Do not ask about branches.
-- **Default branch looks closed** (long-lived code, CI, a deployment or several people, or the user
-  said branches and PRs) → before EACH change that writes code, ask with the question tool
-  (`../asdd/references/marcsh.md` §3): "Do it on this branch (`<current>`), on a new one, or on
-  `<default branch>` directly?", your recommendation first; record the answer in the feature
-  document. Already on another branch
-  is no exception: an unrelated change does not go into it without asking. A new branch is named by
-  intent and closes with a pull request. (In paused AUTO or YOLO approval mode, recommend a worktree: see
-  the Approval mode rule in the agent's hard rules.)
-- **Docs, wiki or config only** → no question, no branch.
+- **On the default branch** → before the first change that writes code, ask with the question tool
+  (`../asdd/references/marcsh.md` §3): a new branch `<type>/<slug>` (recommended), or a worktree
+  (recommended instead when the folder holds changes you did not make or the approval mode is
+  paused). Record the answer in the feature document. A new branch is named by intent and closes
+  with a pull request.
+- **On another branch** → an unrelated change does not go into it without asking: this branch
+  (`<current>`) or a new one.
+- **Notes under `02-DOCS` that you will not commit** → no question, no branch.
 - **Another session working in this same folder** → a separate worktree (`git worktree add
-  ../<repo>-<branch> -b <branch>`), never a branch switch under the other session. Only when you can
-  see signs of one; alone, setting one up costs more than it protects.
+  ../<repo>-worktrees/<slug> -b <type>/<slug>`), never a branch switch under the other session.
+  Only when you can see signs of one.
 
 Once the branch lands, remove its worktree and branch only if you created them and they are merged.
 

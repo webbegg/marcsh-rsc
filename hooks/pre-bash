@@ -85,7 +85,7 @@ esac
 [ -n "$ACTIONS" ] || exit 0
 case $ACTIONS in
   "too-many$TAB"*)
-    block "too many git pushes in one command (${ACTIONS##*"$TAB"} gated git/gh calls: push refspecs, PRs, merges, commits; at most 20 are checked); split it into several commands."
+    block "too many gated git/gh calls in one command (${ACTIONS##*"$TAB"}: push refspecs, PRs, merges and commits count; at most 20 are checked); split it into several commands."
     finish
     ;;
 esac
@@ -111,7 +111,9 @@ while IFS=$TAB read -r _kind _dir _a _b; do
     note "$_a"
     continue
   fi
-  case $_kind in push | push-del | push-all) ;; *) over_time && break ;; esac # pushes: gate_push_commits
+  # The deadline: checked here before every other gated call; pushes check it themselves, right
+  # before each git call that is still to run (rsc_push_batch, gate_push_commits).
+  case $_kind in push | push-del | push-all) ;; *) over_time && break ;; esac
   # Not in a work tree (or a path the reader could not resolve, like $VAR): git itself refuses.
   rsc_context "$_dir" || continue
   case $_kind in

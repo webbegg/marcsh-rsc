@@ -9,7 +9,9 @@
 # refspec, not HEAD) against the default branch: what leaves the machine.
 #
 # Errors: when the tier cannot be computed (no default branch, no common history) the gates allow
-# with a note, as every check does. Once the tier IS 2, blocking is the documented safe default
+# with a note, as every check does. Time is different: a check still to run once pre-bash's
+# DEADLINE (8 s) has passed blocks (over_time, "split it"), because a hook that times out allows
+# the call on Claude. Once the tier IS 2, blocking is the documented safe default
 # (skills/asdd/references/without-rsc-cli.md §1: "at tier 2, do not push, open a PR or merge until
 # the spec exists, the three lenses ran and the user said yes"): a missing, unreadable or failing
 # spec or progress file blocks.
@@ -154,10 +156,12 @@ EOF
   if [ "$_pb_n" -ge 2 ]; then
     over_time && return 0
     # `S^{commit}` for each source, then their full names, each followed by a --rsc-end marker
-    # (rev-parse echoes an unknown option): one line per commit, then 0 or 1 name per marker.
+    # (rev-parse echoes an unknown option). Before its first marker a source must give exactly one
+    # line, a commit id; one that gives more or other lines (a range such as X..Y, X...Y, X^!) is
+    # not a single commit-ish and is left to rsc_rev, alone. After the commits: 0 or 1 name each.
     set --
     while IFS= read -r _pb_s; do
-      [ -z "$_pb_s" ] || set -- "$@" "$_pb_s^{commit}"
+      [ -z "$_pb_s" ] || set -- "$@" "$_pb_s^{commit}" --rsc-end
     done << EOF
 $_pb_list
 EOF
@@ -167,30 +171,35 @@ EOF
     done << EOF
 $_pb_list
 EOF
-    if _pb_out=$(git -C "$RSC_TOP" rev-parse "$@" -- 2> /dev/null); then
-      _pb_i=0 _pb_m=0 _pb_ok=1 _pb_q=$_pb_list _pb_oq='' _pb_name='' _pb_rv=''
+    if _pb_out=$(rsc_git "$RSC_TOP" rev-parse "$@" -- 2> /dev/null); then
+      _pb_m=0 _pb_ok=1 _pb_q=$_pb_list _pb_oq='' _pb_o='' _pb_c=0 _pb_name='' _pb_rv=''
       while IFS= read -r _pb_l; do
-        if [ "$_pb_i" -lt "$_pb_n" ]; then
-          case $_pb_l in '' | *[!0-9a-f]*) _pb_ok=0; break ;; esac
-          _pb_i=$((_pb_i + 1))
-          _pb_oq="$_pb_oq$_pb_l$NL"
+        if [ "$_pb_l" = --rsc-end ]; then
+          _pb_m=$((_pb_m + 1))
+          if [ "$_pb_m" -le "$_pb_n" ]; then
+            # One source's commit: kept only when it was exactly one commit id (else empty).
+            [ "$_pb_c" = 1 ] || _pb_o=''
+            _pb_oq="$_pb_oq$_pb_o$NL"
+            _pb_o='' _pb_c=0
+            continue
+          fi
+          [ "$_pb_m" -le $((_pb_n * 2)) ] || { _pb_ok=0; break; }
+          _pb_s=${_pb_q%%"$NL"*} _pb_q=${_pb_q#*"$NL"}
+          _pb_o=${_pb_oq%%"$NL"*} _pb_oq=${_pb_oq#*"$NL"}
+          [ -z "$_pb_o" ] || _pb_rv="$_pb_rv$RSC_TOP $_pb_s$TAB$_pb_o$TAB$_pb_name$NL"
+          _pb_name=''
           continue
         fi
-        case $_pb_l in
-          --rsc-end)
-            _pb_m=$((_pb_m + 1))
-            [ "$_pb_m" -le "$_pb_n" ] || { _pb_ok=0; break; }
-            _pb_s=${_pb_q%%"$NL"*} _pb_q=${_pb_q#*"$NL"}
-            _pb_o=${_pb_oq%%"$NL"*} _pb_oq=${_pb_oq#*"$NL"}
-            _pb_rv="$_pb_rv$RSC_TOP $_pb_s$TAB$_pb_o$TAB$_pb_name$NL"
-            _pb_name=''
-            ;;
-          refs/heads/?*) [ -n "$_pb_name" ] || _pb_name=${_pb_l#refs/heads/} ;;
-        esac
+        if [ "$_pb_m" -lt "$_pb_n" ]; then
+          _pb_c=$((_pb_c + 1))
+          case $_pb_l in '' | *[!0-9a-f]*) _pb_c=2 ;; *) _pb_o=$_pb_l ;; esac
+          continue
+        fi
+        case $_pb_l in refs/heads/?*) [ -n "$_pb_name" ] || _pb_name=${_pb_l#refs/heads/} ;; esac
       done << EOF
 $_pb_out
 EOF
-      [ "$_pb_ok" = 1 ] && [ "$_pb_m" = "$_pb_n" ] && _RV_CACHE="$_RV_CACHE$_pb_rv"
+      [ "$_pb_ok" = 1 ] && [ "$_pb_m" = $((_pb_n * 2)) ] && _RV_CACHE="$_RV_CACHE$_pb_rv"
     fi
   fi
   # The distinct commits not checked yet (a source rev-parse could not resolve goes alone).
@@ -222,7 +231,7 @@ EOF
   # The commits that add something to the default branch, and their merge base when it is one
   # commit shared by all of them: a single boundary and no root commit in the union.
   # shellcheck disable=SC2086
-  _pb_rl=$({ git -C "$RSC_TOP" rev-list --boundary --parents "^$_pb_base" $_pb_oids -- 2> /dev/null && echo ok; } | awk -v want="$_pb_oids" '
+  _pb_rl=$({ rsc_git "$RSC_TOP" rev-list --boundary --parents "^$_pb_base" $_pb_oids -- 2> /dev/null && echo ok; } | awk -v want="$_pb_oids" '
     BEGIN { n = split(want, W, " "); for (i = 1; i <= n; i++) WANT[W[i]] = 1 }
     $0 == "ok" { done = 1; next }
     substr($0, 1, 1) == "-" { nb++; b = substr($1, 2); next }

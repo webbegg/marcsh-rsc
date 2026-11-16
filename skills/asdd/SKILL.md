@@ -66,7 +66,14 @@ Every entry carries a kind, one line each, in exactly this form (no bold, no oth
 ```markdown
 - [blocking] Q3 — <what must be decided>, <evidence>, <task>
 - [review-after] Q4 — <assumption taken>, <where it is recorded>, <task>
+- [closed] Q2 — <what was decided>, <evidence>, <task>
+  Answer (YYYY-MM-DD): "<the human's words, verbatim>"
 ```
+
+**Closing an entry.** Only the human's answer closes a `blocking` entry. Record the answer verbatim
+on an indented line under the entry (no bullet), then change only the entry's tag from
+`[blocking]` to `[closed]`. That tag change is the one edit allowed to an old line of the
+append-only progress file. The merge hook blocks only on `- [blocking]`.
 
 - **`blocking`** — tier 2, a contradiction with a recorded decision, no convergence in 3 rounds, a hard failure. It stops a self-merge.
 - **`review-after`** — clarify's recorded assumptions, a spec reference the agent had to write itself, a provisional constitution ratification. It never stops a merge; it is listed in the PR body (or the parked summary) for the human.

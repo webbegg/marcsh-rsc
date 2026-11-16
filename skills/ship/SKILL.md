@@ -47,7 +47,7 @@ Run this before presenting the landing options. Any unchecked item is a stop —
 - [ ] **Rebased / up to date with the base, and tested there** — branch is on top of latest `main`; conflicts resolved locally, not punted to the merge; the checks re-ran on the rebased branch (in the background, by the long-command rule in `../verify/references/generic-gate.md`).
 - [ ] **Risk tier known** — computed for `git diff --name-only main...HEAD` by the table in `../asdd/references/without-rsc-cli.md` §1; its tier, classes and human-approval line go into the PR's Risk section.
 - [ ] **No `blocking` entry in the decision queue** (`## Decision queue` in `progress/<slug>.md`) — or the PR says which remain and it does not self-merge. `review-after` entries never block; they are listed in the PR body (or the parked summary) for the human.
-- [ ] **No secrets in the diff** — scan the staged/branch diff for keys, tokens, `.env` values (`git diff main... | grep -iE 'api[_-]?key|secret|password|token|BEGIN .*PRIVATE KEY'`). A hit is a blocker; remove it, and rotate it if it was ever pushed. The pack's secrets hook blocks such a commit or push: enforced when the pack hooks are on; otherwise held by discipline.
+- [ ] **No secrets in the diff** — scan the staged/branch diff for keys, tokens, `.env` values without printing them: `git diff main... | grep -ciE 'api[_-]?key|secret|password|token|BEGIN .*PRIVATE KEY'` counts the matching lines, and when it is not 0, `git diff --name-only main... | xargs git grep -liE 'api[_-]?key|secret|password|token|BEGIN .*PRIVATE KEY' --` names the files. Never print or quote a value. A hit is a blocker; remove it, and rotate it if it was ever pushed. The pack's secrets hook blocks such a commit or push: enforced when the pack hooks are on; otherwise held by discipline.
 - [ ] **Authorship is the responsible person** — `git config user.email` is the configured human; no AI trailer in any commit on the branch (run the grep above across `main..HEAD`).
 - [ ] **Commit history is intelligible** — squashed or organized so the history reads as deliberate, not "wip wip fix fix".
 
@@ -185,7 +185,9 @@ history; squash when the branch history is noisy, preserve when each commit is m
 conversation, asked as its own question-tool question ("Merge PR #<n> now?") and recorded
 verbatim. When the pack hooks are on, the agent's tier-2 merge is blocked whatever the answer: the
 human merges in the forge. CI green means a finished check run: watch it with
-`gh pr checks --watch` in the background (`bg_start`), never in a foreground call. An agent's approval never counts as a human's: no refuter, reviewer subagent or bot
+`gh pr checks --watch` by the long-command rule (`../verify/references/generic-gate.md`): in the
+background (`bg_start` on pi, the Bash tool's background option on Claude) or with an explicit
+`timeout`, never a plain foreground call. An agent's approval never counts as a human's: no refuter, reviewer subagent or bot
 review stands in for it, however clean.
 
 Once it is merged, pull the trunk — `git switch main && git pull --ff-only` — then clean up as above. A squashed pull request does not show as merged to git (`git branch --merged` will not list it), so check the PR state instead; keep the local branch until the user agrees to delete it, because `git branch -D` is not recoverable and while the branch exists the work is.

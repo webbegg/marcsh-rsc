@@ -154,18 +154,22 @@ message is not seen.
 ## 6. Where the work goes (replaces `rsc main status`, `rsc main unlock`, worktrees)
 
 rsc records, per project, whether the default branch is open or closed to the agent. marcsh has no
-such switch, so ask.
+such switch, and it blocks every `git commit` on the default branch in every approval mode, so code
+work never runs there.
 
-- Work that writes only docs, wiki or config needs no question.
+- Notes under `02-DOCS` that will not be committed need no question.
 - On the default branch (`main`, `master`), before the first code change of a feature ask in one
-  line, with the question tool (`marcsh.md` §3): "Do it on this branch (`<current>`), on a new
-  branch, or on `<default>` directly?" Recommend a new branch when the project has CI, a deployment
-  or several people, and put it first. Wait for the answer and record it. (In
-  paused AUTO or YOLO approval mode, recommend a worktree; see the agent's Approval mode rule.)
-- Already on another branch: an unrelated change does not go into it without asking.
+  line, with the question tool (`marcsh.md` §3): "Start it on a new branch `<type>/<slug>`, or in
+  a worktree?" Recommend the new branch and put it first; recommend the worktree instead when the
+  folder holds changes you did not make or the approval mode is paused (`marcsh.md` §5). Wait for
+  the answer and record it. The default branch is never an option.
+- In autopilot nobody is asked: take the new branch and record it as a `review-after` entry. When
+  marcsh denies the switch (headless), stop: nothing can be committed.
+- Already on another branch: an unrelated change does not go into it without asking (this branch
+  or a new one).
 - Never switch the branch under another session working in the same folder. If you see signs of
   one (uncommitted changes you did not make, a lock file), say so and offer a separate worktree:
-  `git worktree add ../<repo>-<branch> -b <branch>`. Do not create one otherwise.
+  `git worktree add ../<repo>-worktrees/<slug> -b <type>/<slug>`. Do not create one otherwise.
 - When the default branch is protected or the user says branches and PRs, a local merge to it is
   not offered at ship; offer the PR and the park option.
 

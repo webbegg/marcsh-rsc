@@ -9,5 +9,6 @@ the current branch): $ARGUMENTS
 
 Load the `review` skill. Compute the risk tier from the diff, then start the subagents it names
 (`task-reviewer` at tier 1, `refuter-correctness`, `refuter-security` and `refuter-tests` at tier
-2) with exactly their inputs, consolidate their findings, verify every blocker and should-fix with
+2) with exactly their inputs (for the closing review, `task-reviewer` in closing mode with the
+spec, the whole branch diff against the default branch and the verification record), consolidate their findings, verify every blocker and should-fix with
 `finding-verifier`, and record the rounds and outcomes. End with the verdict.
