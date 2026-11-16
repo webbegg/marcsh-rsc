@@ -1,0 +1,231 @@
+#!/bin/sh
+# leftovers — list, count or stop the processes this marcsh session left running.
+#
+# Usage:
+#   leftovers                  one line per live process: pid  age  rssMB  command
+#   leftovers --count          just the number
+#   leftovers --stop PID...    stop these pids: TERM, up to 2 s, then KILL
+#
+# A process belongs to this session when its environment holds MARCSH_SESSION equal to the
+# caller's own $MARCSH_SESSION. marcsh sets that marker on every process its tools start, and
+# Claude's Bash children inherit it, so this is the Claude-engine path (on pi, `proc_list` and
+# `proc_stop` do the same) and the fallback on a marcsh without those tools. Matching is by the
+# marker only, never by name or folder: the user's own processes never show. This script, its own
+# children and its parent chain are left out. --stop re-checks the marker of each pid right before
+# signalling it and refuses any pid without it. Nothing else is ever signalled.
+#
+# macOS reads environments with `ps -E`; Linux with /proc/<pid>/environ. No network.
+# Limit on macOS: the system hides the environment of Apple's own binaries (/bin/sh, /bin/sleep
+# and the like) from `ps -E`, so those are never listed there (and --stop refuses them);
+# third-party programs such as node are seen. On Linux every process of the user is seen.
+# Exit: 0 ok; 1 no marker, or a pid refused or not stopped; 2 usage.
+
+set -u
+LC_ALL=C
+export LC_ALL
+
+note() { printf 'leftovers: %s\n' "$*" >&2; }
+
+usage() {
+  printf 'Usage: leftovers [--count | --stop PID...]\n' >&2
+  printf '  (no option)     list this session'"'"'s live processes: pid  age  rssMB  command\n' >&2
+  printf '  --count         print only how many there are\n' >&2
+  printf '  --stop PID...   stop these pids (TERM, up to 2 s, then KILL); unmarked pids are refused\n' >&2
+  exit 2
+}
+
+MODE=list
+case ${1-} in
+  '') ;;
+  --count) [ $# -eq 1 ] || usage; MODE=count ;;
+  --stop) shift; [ $# -ge 1 ] || usage; MODE=stop ;;
+  -h|--help) usage ;;
+  *) note "unknown argument: $1"; usage ;;
+esac
+
+if [ -z "${MARCSH_SESSION-}" ]; then
+  note 'MARCSH_SESSION is not set, so there is no session marker to look for.'
+  note 'Run this from a shell marcsh started (its tools set the marker; older marcsh does not).'
+  exit 1
+fi
+SESSION=$MARCSH_SESSION
+export MARCSH_SESSION
+
+if [ "$(uname -s 2>/dev/null)" = Linux ] && [ -r /proc/self/environ ]; then
+  OS=linux
+else
+  OS=ps
+fi
+
+# ppid_of PID: the parent pid, empty when the process is gone.
+ppid_of() {
+  if [ "$OS" = linux ]; then
+    awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null
+  else
+    ps -o ppid= -p "$1" 2>/dev/null | tr -d ' '
+  fi
+}
+
+# This script and its parent chain (the shell that ran it, the engine above): never listed or stopped.
+CHAIN=" $$ "
+_p=$$
+_i=0
+while [ "$_i" -lt 64 ]; do
+  _q=$(ppid_of "$_p")
+  case $_q in ''|0|*[!0-9]*) break ;; esac
+  CHAIN="$CHAIN$_q "
+  [ "$_q" = 1 ] && break
+  _p=$_q
+  _i=$((_i + 1))
+done
+
+in_chain() {
+  case $CHAIN in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
+# is_marked PID: its environment holds MARCSH_SESSION=<this session> as a whole entry.
+is_marked() {
+  if [ "$OS" = linux ]; then
+    [ -r "/proc/$1/environ" ] || return 1
+    tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null | grep -qxF "MARCSH_SESSION=$SESSION"
+  else
+    ps -ww -E -o command= -p "$1" 2>/dev/null | awk '
+      BEGIN { t = " MARCSH_SESSION=" ENVIRON["MARCSH_SESSION"] " "; miss = 1 }
+      index($0 " ", t) { miss = 0 }
+      END { exit miss }'
+  fi
+}
+
+# alive PID: the process exists and is not a zombie.
+alive() {
+  kill -0 "$1" 2>/dev/null || return 1
+  if [ "$OS" = linux ]; then
+    _s=$(sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | cut -c1)
+  else
+    _s=$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ' | cut -c1)
+  fi
+  [ -n "$_s" ] && [ "$_s" != Z ]
+}
+
+# Snapshot lines: `pid ppid age rssKB stat marked command`, marked = 1 or 0.
+snapshot_ps() {
+  _marked=$(ps -A -ww -E -o pid=,command= 2>/dev/null | awk '
+    BEGIN { t = " MARCSH_SESSION=" ENVIRON["MARCSH_SESSION"] " " }
+    index($0 " ", t) { printf "%s ", $1 }')
+  ps -A -ww -o pid=,ppid=,etime=,rss=,stat=,command= 2>/dev/null | awk -v marked=" $_marked" '
+    {
+      m = index(marked, " " $1 " ") ? 1 : 0
+      c = $0
+      for (i = 1; i <= 5; i++) sub(/^[ \t]*[^ \t]+/, "", c)
+      sub(/^[ \t]+/, "", c)
+      print $1, $2, $3, $4, $5, m, c
+    }'
+}
+
+snapshot_linux() {
+  _up=$(awk '{ print int($1) }' /proc/uptime 2>/dev/null)
+  _hz=$(getconf CLK_TCK 2>/dev/null)
+  case $_hz in ''|*[!0-9]*) _hz=100 ;; esac
+  _pg=$(getconf PAGESIZE 2>/dev/null)
+  case $_pg in ''|*[!0-9]*) _pg=4096 ;; esac
+  for _d in /proc/[0-9]*; do
+    _pid=${_d#/proc/}
+    is_marked "$_pid" || continue
+    _cmd=$(tr '\0' ' ' < "$_d/cmdline" 2>/dev/null)
+    [ -n "$_cmd" ] || _cmd="[$(cat "$_d/comm" 2>/dev/null)]"
+    LEFTOVERS_CMD=$_cmd awk -v pid="$_pid" -v up="${_up:-0}" -v hz="$_hz" -v pg="$_pg" '
+      {
+        sub(/^.*\) /, "")
+        s = int(up - $20 / hz); if (s < 0) s = 0
+        d = int(s / 86400); h = int((s % 86400) / 3600); mi = int((s % 3600) / 60); se = s % 60
+        if (d > 0) age = sprintf("%d-%02d:%02d:%02d", d, h, mi, se)
+        else if (h > 0) age = sprintf("%02d:%02d:%02d", h, mi, se)
+        else age = sprintf("%02d:%02d", mi, se)
+        print pid, $2, age, int($22 * pg / 1024), $1, 1, ENVIRON["LEFTOVERS_CMD"]
+      }' "$_d/stat" 2>/dev/null
+  done
+}
+
+# Keep the marked, live processes outside this script's chain and its own descendants.
+filter() {
+  awk -v chain="$CHAIN" -v self="$$" -v mode="$MODE" '
+    {
+      pid = $1; par[pid] = $2; age[pid] = $3; rss[pid] = $4; st[pid] = $5; mk[pid] = $6
+      c = $0
+      for (i = 1; i <= 6; i++) sub(/^[ \t]*[^ \t]+/, "", c)
+      sub(/^[ \t]+/, "", c)
+      cmd[pid] = c; order[++n] = pid
+    }
+    END {
+      cnt = 0
+      for (k = 1; k <= n; k++) {
+        pid = order[k]
+        if (mk[pid] != 1 || st[pid] ~ /^Z/ || index(chain, " " pid " ")) continue
+        mine = 0; p = pid; j = 0
+        while (j++ < 64 && (p in par)) { p = par[p]; if (p == self) { mine = 1; break } }
+        if (mine) continue
+        cnt++
+        if (mode == "list") {
+          c = cmd[pid]; if (length(c) > 120) c = substr(c, 1, 120)
+          printf "%s  %s  %.1fMB  %s\n", pid, age[pid], rss[pid] / 1024, c
+        }
+      }
+      if (mode == "count") print cnt
+      else if (cnt == 0) print "leftovers: no leftover processes for this session" > "/dev/stderr"
+    }'
+}
+
+nap() { sleep 0.2 2>/dev/null || sleep 1; }
+
+# stop_one PID: prints one result line; returns 0 when the pid is gone afterwards.
+stop_one() {
+  case $1 in
+    ''|*[!0-9]*) echo "refused $1: not a pid"; return 1 ;;
+  esac
+  if in_chain "$1"; then
+    echo "refused $1: this script or the shell that runs it"
+    return 1
+  fi
+  if ! alive "$1"; then
+    echo "gone $1"
+    return 0
+  fi
+  if ! is_marked "$1"; then
+    echo "refused $1: not started by this marcsh session (no MARCSH_SESSION marker)"
+    return 1
+  fi
+  kill -TERM "$1" 2>/dev/null
+  _n=0
+  while [ "$_n" -lt 10 ]; do
+    alive "$1" || { echo "stopped $1"; return 0; }
+    nap
+    _n=$((_n + 1))
+  done
+  alive "$1" || { echo "stopped $1"; return 0; }
+  # Same pid, still marked? (A pid freed and reused within the grace is not ours.)
+  if ! is_marked "$1"; then
+    echo "stopped $1"
+    return 0
+  fi
+  kill -KILL "$1" 2>/dev/null
+  nap
+  if alive "$1"; then
+    echo "failed $1: still running after KILL"
+    return 1
+  fi
+  echo "killed $1 (did not exit on TERM within 2 s)"
+}
+
+case $MODE in
+  stop)
+    rc=0
+    for _pid in "$@"; do
+      stop_one "$_pid" || rc=1
+    done
+    exit "$rc"
+    ;;
+  *)
+    if [ "$OS" = linux ]; then snapshot_linux | filter; else snapshot_ps | filter; fi
+    ;;
+esac

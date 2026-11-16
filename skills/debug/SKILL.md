@@ -36,7 +36,11 @@ changes behavior beyond the bug, with the question tool (`../asdd/references/mar
 Commands follow the long-command rule (`../verify/references/generic-gate.md`, "Long commands"):
 the single repro and the new test run in the foreground; flake loops (`k/N` runs), the surrounding
 suite and `git bisect run` go to `bg_start` (the engine's background mode on Claude) or get an
-explicit `timeout`, and their exit code comes from the background result.
+explicit `timeout`, and their exit code comes from the background result. A repro that needs a
+server, a browser or a watcher starts it with `bg_start` and stops it (`bg_kill`) once the
+evidence is taken; before you report the fix, check for leftovers (`proc_list` on pi; on Claude
+`sh scripts/leftovers` from the `verify` skill's folder) and stop the ones the debugging started
+(`../verify/references/generic-gate.md`, "Stop what you start").
 
 ## The loop — five steps, never skipped, never reordered
 
